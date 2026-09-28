@@ -22,10 +22,10 @@
   "ontology_artifacts": 5,
   "vocabulary_artifacts": 11,
   "ontology_and_vocabulary_artifacts": 16,
-  "profile_artifacts": 1,
+  "profile_artifacts": 2,
   "example_datasets": 1,
   "test_datasets": 3,
-  "reports_or_documentation": 8,
+  "reports_or_documentation": 7,
   "duplicates_removed": 0,
   "already_in_artifacts_csv": 7,
   "warnings": [
@@ -87,8 +87,8 @@
       "shacl": 2,
       "ontology": 0,
       "vocabulary": 0,
-      "profile": 0,
-      "supporting": 1
+      "profile": 1,
+      "supporting": 0
     },
     {
       "source_id": "SRC006",

@@ -264,8 +264,9 @@ def collect() -> AdapterResult:
         ],
         notes=[
             "Primary artifacts enumerated from the fixed GeoSPARQL 1.1 manifest groups.",
-            "Catalogue metadata, agents, labels, alignments, and unrelated support "
-            "files were not collected as primary artifacts.",
+            "Root-level catalogue metadata, agents, labels, and root-level "
+            "alignments.ttl were not collected as primary artifacts. "
+            "ontologies/alignments.ttl remains in scope via ontologies/*.ttl.",
             "Authoritative provenance and normative status are recorded separately "
             "for the SHACL validator.",
         ],

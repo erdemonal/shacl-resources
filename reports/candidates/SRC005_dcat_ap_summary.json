@@ -7,14 +7,15 @@
   "ontology_artifacts": 0,
   "vocabulary_artifacts": 0,
   "ontology_and_vocabulary_artifacts": 0,
-  "profile_artifacts": 0,
+  "profile_artifacts": 1,
   "example_datasets": 0,
   "test_datasets": 0,
-  "reports_or_documentation": 1,
+  "reports_or_documentation": 0,
   "warnings": [],
   "notes": [
     "Pilot selection uses only releases/3.0.1/shacl/ (dcat-ap-SHACL.ttl, ranges.ttl).",
     "releases/3.0.1/html/shacl/ is not enumerated here because it contains supporting HTML/source material, including non-SHACL import helpers and files that retain 3.0.0 identifiers.",
+    "The 3.0.1 release index is recorded as a primary profile artifact.",
     "Historical DCAT-AP releases remain outside this pilot snapshot."
   ],
   "outputs": {

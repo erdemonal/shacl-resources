@@ -114,8 +114,8 @@ def collect() -> AdapterResult:
     candidates.append(
         Candidate(
             source_id="SRC005",
-            artifact_type="documentation",
-            name="DCAT-AP 3.0.1 Release Index",
+            artifact_type="profile",
+            name="DCAT-AP 3.0.1 Application Profile",
             version=DCAT_AP_TAG,
             url=index_url,
             repository_path=f"releases/{DCAT_AP_TAG}/index.html",
@@ -129,15 +129,15 @@ def collect() -> AdapterResult:
             tests_available=UNKNOWN,
             license=UNKNOWN,
             notes=(
-                "Release index retained to identify the selected application "
-                "profile snapshot."
+                "Primary application-profile release document for the selected "
+                "DCAT-AP 3.0.1 snapshot."
             ),
             source_snapshot=f"SEMICeu/DCAT-AP release {DCAT_AP_TAG}",
             evidence_url=(
                 f"https://github.com/SEMICeu/DCAT-AP/tree/{DCAT_AP_TAG}/"
                 f"releases/{DCAT_AP_TAG}"
             ),
-            collection_note="minimum documentation artifact for target identification",
+            collection_note="primary application-profile artifact for the fixed snapshot",
         )
     )
 
@@ -153,6 +153,7 @@ def collect() -> AdapterResult:
             "releases/3.0.1/html/shacl/ is not enumerated here because it "
             "contains supporting HTML/source material, including non-SHACL "
             "import helpers and files that retain 3.0.0 identifiers.",
+            "The 3.0.1 release index is recorded as a primary profile artifact.",
             "Historical DCAT-AP releases remain outside this pilot snapshot.",
         ],
     )
