@@ -89,7 +89,7 @@ For each source, the repository records fields such as:
 
 ### Artifacts
 
-An artifact represents a specific file or resource, such as a specification, ontology, SHACL shapes graph, profile, example dataset, test dataset, or documentation page.
+An artifact represents a specific file or resource, such as a specification, ontology, vocabulary, SHACL shapes graph, profile, example dataset, test dataset, or documentation page.
 
 For each artifact, the repository records fields such as:
 
@@ -119,23 +119,33 @@ After a source is included, artifacts are collected from one fixed reference sna
 
 A current stable or recommended release is preferred when one exists. If no such release is available, an exact repository commit or a persistent record such as a DOI is used instead.
 
-Within the selected snapshot, all artifacts that fall within the collection scope are recorded. Artifacts are not selected because they appear interesting for a possible research question.
+Within the selected snapshot, in-scope artifacts are recorded according to their role. Artifacts are not selected because they appear interesting for a possible research question.
 
-The initial collection scope covers:
+### Primary and supporting artifacts
+
+Primary artifacts are individually enumerated within the selected snapshot:
 
 - SHACL shapes;
-- ontology or vocabulary artifacts;
-- specification or profile documents needed to identify the validation target;
-- example RDF data;
-- test RDF data;
+- ontology artifacts;
+- vocabulary artifacts;
+- profiles or specifications needed to identify the validation target.
+
+Supporting artifacts are:
+
+- example data;
+- test data;
 - validation reports;
-- documentation that explains the SHACL artifact or its intended target.
+- explanatory documentation.
+
+Supporting artifacts are individually recorded when they are standalone published resources in the selected release or deposit, or when they are needed to reproduce or interpret validation. Repository-local test or example fixtures do not need one manifest row each. For those, the availability and location are recorded with the associated primary resource or source instead.
+
+The fields `examples_available` and `tests_available` mean that associated examples or tests were verified as present in the selected snapshot. Absence is not claimed when it has not been checked.
 
 Material that is not part of this scope, such as build logs, logos, stylesheets, or other website assets, is not recorded as corpus artifacts.
 
 Historical versions are not collected during the initial pilot unless they are needed to identify or interpret the selected artifact. If later analysis shows that version comparison is research-worthy, the protocol can be extended for that purpose.
 
-If a source exposes a machine-readable registry, all qualifying entries are enumerated from that registry rather than selected manually. For example, when a register lists building blocks with associated SHACL shapes, every entry with a non-empty SHACL field in the fixed register snapshot is recorded.
+If a source exposes a machine-readable registry or manifest, qualifying primary entries are enumerated from that registry or manifest rather than selected manually. For example, when a register lists building blocks with associated SHACL shapes, every entry with a non-empty SHACL field in the fixed register snapshot contributes its distinct SHACL artifacts.
 
 ## Versioning and provenance
 

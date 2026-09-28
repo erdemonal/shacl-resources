@@ -109,6 +109,8 @@ def summarize_merged(
     for result in results:
         warnings.extend(result.warnings)
 
+    ontology_count = count_type("ontology")
+    vocabulary_count = count_type("vocabulary")
     return {
         "sources_considered": [result.source_id for result in results],
         "included_sources_processed": [
@@ -119,7 +121,10 @@ def summarize_merged(
         ],
         "candidate_rows": len(candidates),
         "distinct_shacl_artifacts": count_type("shacl"),
-        "ontology_vocabulary_artifacts": count_type("ontology"),
+        "ontology_artifacts": ontology_count,
+        "vocabulary_artifacts": vocabulary_count,
+        "ontology_and_vocabulary_artifacts": ontology_count + vocabulary_count,
+        "profile_artifacts": count_type("profile"),
         "example_datasets": count_type("example_data"),
         "test_datasets": count_type("test_data"),
         "reports_or_documentation": count_type("documentation")
@@ -133,6 +138,29 @@ def summarize_merged(
                 "source_name": result.source_name,
                 "status": result.status,
                 "candidate_rows": len(result.candidates),
+                "shacl": sum(
+                    1 for item in result.candidates if item.artifact_type == "shacl"
+                ),
+                "ontology": sum(
+                    1 for item in result.candidates if item.artifact_type == "ontology"
+                ),
+                "vocabulary": sum(
+                    1 for item in result.candidates if item.artifact_type == "vocabulary"
+                ),
+                "profile": sum(
+                    1 for item in result.candidates if item.artifact_type == "profile"
+                ),
+                "supporting": sum(
+                    1
+                    for item in result.candidates
+                    if item.artifact_type
+                    in {
+                        "example_data",
+                        "test_data",
+                        "documentation",
+                        "specification",
+                    }
+                ),
             }
             for result in results
         ],
@@ -158,10 +186,13 @@ def print_merged_summary(summary: dict) -> None:
     )
     print(f"candidate rows:                  {summary['candidate_rows']}")
     print(f"distinct SHACL artifacts:        {summary['distinct_shacl_artifacts']}")
+    print(f"ontology artifacts:              {summary['ontology_artifacts']}")
+    print(f"vocabulary artifacts:            {summary['vocabulary_artifacts']}")
     print(
-        "ontology/vocabulary artifacts:   "
-        f"{summary['ontology_vocabulary_artifacts']}"
+        "ontology + vocabulary (display): "
+        f"{summary['ontology_and_vocabulary_artifacts']}"
     )
+    print(f"profile artifacts:               {summary['profile_artifacts']}")
     print(f"example datasets:                {summary['example_datasets']}")
     print(f"test datasets:                   {summary['test_datasets']}")
     print(f"reports/documentation:           {summary['reports_or_documentation']}")
@@ -174,8 +205,11 @@ def print_merged_summary(summary: dict) -> None:
     print("per-source reports:")
     for item in summary["per_source_outputs"]:
         print(
-            f"  - {item['source_id']} {item['source_name']}: "
-            f"{item['status']}, {item['candidate_rows']} rows"
+            f"  - {item['source_id']} {item['source_name']}: {item['status']}; "
+            f"rows={item['candidate_rows']} "
+            f"(shacl={item['shacl']}, ontology={item['ontology']}, "
+            f"vocabulary={item['vocabulary']}, profile={item['profile']}, "
+            f"supporting={item['supporting']})"
         )
     print(f"wrote: {summary['outputs']['candidates_csv']}")
     print(f"wrote: {summary['outputs']['summary_json']}")

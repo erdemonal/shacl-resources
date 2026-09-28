@@ -2,17 +2,22 @@
   "source_id": "SRC004",
   "source_name": "GeoSPARQL",
   "status": "processed",
-  "candidate_rows": 2,
+  "candidate_rows": 9,
   "distinct_shacl_artifacts": 1,
-  "ontology_vocabulary_artifacts": 0,
+  "ontology_artifacts": 3,
+  "vocabulary_artifacts": 3,
+  "ontology_and_vocabulary_artifacts": 6,
+  "profile_artifacts": 1,
   "example_datasets": 0,
   "test_datasets": 0,
   "reports_or_documentation": 1,
   "warnings": [
-    "Community repository https://github.com/opengeospatial/ogc-geosparql-shapes was observed but not collected as a pilot artifact; it is a repository of extended community shapes, not a specific official GeoSPARQL 1.1 SHACL resource. It may be screened later as a separate source."
+    "Community repository https://github.com/opengeospatial/ogc-geosparql-shapes was observed but not collected as a pilot artifact; it may be screened later as a separate source."
   ],
   "notes": [
-    "Validator URL is pinned to an exact repository commit, not main."
+    "Primary artifacts enumerated from the fixed GeoSPARQL 1.1 manifest groups.",
+    "Catalogue metadata, agents, labels, alignments, and unrelated support files were not collected as primary artifacts.",
+    "Authoritative provenance and normative status are recorded separately for the SHACL validator."
   ],
   "outputs": {
     "candidates_csv": "reports/candidates/SRC004_geosparql.csv",

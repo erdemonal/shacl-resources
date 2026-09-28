@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 """SRC004 GeoSPARQL adapter.
 
-Fixed snapshot: GeoSPARQL 1.1 validator pinned to
-opengeospatial/geosemantics-semantic-resources commit
-658d2ad16e4c28a786ff657a8517fa8f7c50abe7
+Fixed repository snapshot:
+opengeospatial/geosemantics-semantic-resources
+commit 658d2ad16e4c28a786ff657a8517fa8f7c50abe7
 
-Collects only the official informative SHACL validator and the minimum
-specification document. Community extended shapes are noted for later
-screening, not collected as pilot artifacts.
+Primary artifacts are selected from the machine-readable GeoSPARQL 1.1
+manifest groups:
+  validators/*.ttl
+  ontologies/*.ttl
+  vocabs/*.ttl
+  profiles/geo.ttl
+
+The GeoSPARQL 1.1 standard document is retained as specification evidence.
 """
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
@@ -25,6 +31,7 @@ from pilot_common import (
     Candidate,
     existing_artifact_urls,
     fail,
+    http_get_json,
     http_get_text,
     mark_already_recorded,
     require_url,
@@ -32,61 +39,194 @@ from pilot_common import (
 )
 
 GEOSPARQL_COMMIT = "658d2ad16e4c28a786ff657a8517fa8f7c50abe7"
-GEOSPARQL_VALIDATOR_PATH = (
-    "resources/geosparql-swg/geosparql-1.1/validators/geo-validator.ttl"
-)
-GEOSPARQL_VALIDATOR_URL = (
+GEOSPARQL_BASE = "resources/geosparql-swg/geosparql-1.1"
+GEOSPARQL_MANIFEST_PATH = f"{GEOSPARQL_BASE}/manifest.ttl"
+GEOSPARQL_MANIFEST_URL = (
     "https://raw.githubusercontent.com/opengeospatial/"
     f"geosemantics-semantic-resources/{GEOSPARQL_COMMIT}/"
-    f"{GEOSPARQL_VALIDATOR_PATH}"
+    f"{GEOSPARQL_MANIFEST_PATH}"
 )
 GEOSPARQL_VALIDATOR_IRI = "http://www.opengis.net/def/geosparql/validator"
 GEOSPARQL_SPEC_URL = "https://docs.ogc.org/is/22-047r1/22-047r1.html"
 GEOSPARQL_EXTENDED_REPO = "https://github.com/opengeospatial/ogc-geosparql-shapes"
+GITHUB_API_BASE = (
+    "https://api.github.com/repos/opengeospatial/geosemantics-semantic-resources/"
+    f"contents/{GEOSPARQL_BASE}"
+)
+
+EXPECTED_MANIFEST_MARKERS = [
+    'prof:hasArtifact "validators/*.ttl"',
+    'prof:hasArtifact "ontologies/*.ttl"',
+    'prof:hasArtifact "vocabs/*.ttl"',
+    'prof:hasArtifact "profiles/geo.ttl"',
+]
+
+
+def pinned_raw_url(relative_path: str) -> str:
+    return (
+        "https://raw.githubusercontent.com/opengeospatial/"
+        f"geosemantics-semantic-resources/{GEOSPARQL_COMMIT}/{relative_path}"
+    )
+
+
+def list_ttl_files(subdir: str) -> list[dict[str, Any]]:
+    api_url = f"{GITHUB_API_BASE}/{subdir}?ref={GEOSPARQL_COMMIT}"
+    listing = http_get_json(api_url)
+    if not isinstance(listing, list):
+        fail(f"expected directory listing for GeoSPARQL {subdir}")
+    files = [
+        item
+        for item in listing
+        if isinstance(item, dict)
+        and item.get("type") == "file"
+        and str(item.get("name", "")).endswith(".ttl")
+    ]
+    if not files:
+        fail(f"no .ttl files found in GeoSPARQL {subdir}")
+    return sorted(files, key=lambda item: str(item.get("name") or ""))
 
 
 def collect() -> AdapterResult:
-    require_url(GEOSPARQL_VALIDATOR_URL, "GeoSPARQL 1.1 validator")
+    require_url(GEOSPARQL_MANIFEST_URL, "GeoSPARQL 1.1 manifest")
     require_url(GEOSPARQL_SPEC_URL, "GeoSPARQL 1.1 specification")
 
-    validator_text = http_get_text(GEOSPARQL_VALIDATOR_URL)
-    if "sh:NodeShape" not in validator_text and "sh:PropertyShape" not in validator_text:
-        fail("GeoSPARQL validator file does not look like a SHACL shapes graph")
-    if "not normative, only informative" not in validator_text:
-        fail(
-            "GeoSPARQL validator file no longer contains the expected informative "
-            "status statement"
+    manifest_text = http_get_text(GEOSPARQL_MANIFEST_URL)
+    for marker in EXPECTED_MANIFEST_MARKERS:
+        if marker not in manifest_text:
+            fail(f"GeoSPARQL manifest missing expected marker: {marker}")
+
+    candidates: list[Candidate] = []
+
+    for item in list_ttl_files("validators"):
+        name = str(item["name"])
+        path = str(item["path"])
+        url = pinned_raw_url(path)
+        require_url(url, name)
+        validator_text = http_get_text(url)
+        if "not normative, only informative" not in validator_text:
+            fail(
+                f"GeoSPARQL validator {name} no longer contains the expected "
+                "informative status statement"
+            )
+        candidates.append(
+            Candidate(
+                source_id="SRC004",
+                artifact_type="shacl",
+                name=f"GeoSPARQL 1.1 RDF Shapes Validator ({name})",
+                version="1.1",
+                url=url,
+                repository_path=path,
+                commit_or_release=GEOSPARQL_COMMIT,
+                format="turtle",
+                authoritative_status="official",
+                intended_target="GeoSPARQL 1.1 RDF data",
+                generation_method=UNKNOWN,
+                examples_available=UNKNOWN,
+                tests_available=UNKNOWN,
+                license=UNKNOWN,
+                notes=(
+                    f"Canonical IRI: {GEOSPARQL_VALIDATOR_IRI}. "
+                    "Authoritative provenance is official OGC material, but the "
+                    "validator is informative, not normative."
+                ),
+                source_snapshot=(
+                    f"geosemantics-semantic-resources@{GEOSPARQL_COMMIT} / GeoSPARQL 1.1"
+                ),
+                evidence_url=GEOSPARQL_MANIFEST_URL,
+                collection_note="selected via manifest validators/*.ttl",
+            )
         )
 
-    candidates = [
+    for item in list_ttl_files("ontologies"):
+        name = str(item["name"])
+        path = str(item["path"])
+        url = pinned_raw_url(path)
+        require_url(url, name)
+        candidates.append(
+            Candidate(
+                source_id="SRC004",
+                artifact_type="ontology",
+                name=f"GeoSPARQL 1.1 Ontology ({name})",
+                version="1.1",
+                url=url,
+                repository_path=path,
+                commit_or_release=GEOSPARQL_COMMIT,
+                format="turtle",
+                authoritative_status="official",
+                intended_target="GeoSPARQL 1.1",
+                generation_method=UNKNOWN,
+                examples_available=UNKNOWN,
+                tests_available=UNKNOWN,
+                license=UNKNOWN,
+                notes="Primary ontology artifact identified by the GeoSPARQL 1.1 manifest.",
+                source_snapshot=(
+                    f"geosemantics-semantic-resources@{GEOSPARQL_COMMIT} / GeoSPARQL 1.1"
+                ),
+                evidence_url=GEOSPARQL_MANIFEST_URL,
+                collection_note="selected via manifest ontologies/*.ttl",
+            )
+        )
+
+    for item in list_ttl_files("vocabs"):
+        name = str(item["name"])
+        path = str(item["path"])
+        url = pinned_raw_url(path)
+        require_url(url, name)
+        candidates.append(
+            Candidate(
+                source_id="SRC004",
+                artifact_type="vocabulary",
+                name=f"GeoSPARQL 1.1 Vocabulary ({name})",
+                version="1.1",
+                url=url,
+                repository_path=path,
+                commit_or_release=GEOSPARQL_COMMIT,
+                format="turtle",
+                authoritative_status="official",
+                intended_target="GeoSPARQL 1.1",
+                generation_method=UNKNOWN,
+                examples_available=UNKNOWN,
+                tests_available=UNKNOWN,
+                license=UNKNOWN,
+                notes="Primary vocabulary artifact identified by the GeoSPARQL 1.1 manifest.",
+                source_snapshot=(
+                    f"geosemantics-semantic-resources@{GEOSPARQL_COMMIT} / GeoSPARQL 1.1"
+                ),
+                evidence_url=GEOSPARQL_MANIFEST_URL,
+                collection_note="selected via manifest vocabs/*.ttl",
+            )
+        )
+
+    profile_path = f"{GEOSPARQL_BASE}/profiles/geo.ttl"
+    profile_url = pinned_raw_url(profile_path)
+    require_url(profile_url, "profiles/geo.ttl")
+    candidates.append(
         Candidate(
             source_id="SRC004",
-            artifact_type="shacl",
-            name="GeoSPARQL 1.1 RDF Shapes Validator",
+            artifact_type="profile",
+            name="GeoSPARQL 1.1 Profile (geo.ttl)",
             version="1.1",
-            url=GEOSPARQL_VALIDATOR_URL,
-            repository_path=GEOSPARQL_VALIDATOR_PATH,
+            url=profile_url,
+            repository_path=profile_path,
             commit_or_release=GEOSPARQL_COMMIT,
             format="turtle",
-            authoritative_status=UNKNOWN,
-            intended_target="GeoSPARQL 1.1 RDF data",
+            authoritative_status="official",
+            intended_target="GeoSPARQL 1.1",
+            profile_name="GeoSPARQL",
             generation_method=UNKNOWN,
             examples_available=UNKNOWN,
             tests_available=UNKNOWN,
             license=UNKNOWN,
-            notes=(
-                f"Canonical IRI: {GEOSPARQL_VALIDATOR_IRI}. "
-                "As of GeoSPARQL 1.1 this validator is informative, not normative."
-            ),
+            notes="Primary profile artifact identified by the GeoSPARQL 1.1 manifest.",
             source_snapshot=(
                 f"geosemantics-semantic-resources@{GEOSPARQL_COMMIT} / GeoSPARQL 1.1"
             ),
-            evidence_url=GEOSPARQL_SPEC_URL,
-            collection_note=(
-                "official core validator pinned to exact repository commit; "
-                "informative status recorded"
-            ),
-        ),
+            evidence_url=GEOSPARQL_MANIFEST_URL,
+            collection_note="selected via manifest profiles/geo.ttl",
+        )
+    )
+
+    candidates.append(
         Candidate(
             source_id="SRC004",
             artifact_type="specification",
@@ -102,16 +242,14 @@ def collect() -> AdapterResult:
             tests_available=UNKNOWN,
             license=UNKNOWN,
             notes=(
-                "Specification document used to identify the validator target "
-                "and status."
+                "Specification document retained as evidence for the selected "
+                "GeoSPARQL 1.1 snapshot and validator status."
             ),
             source_snapshot="GeoSPARQL 1.1",
             evidence_url=GEOSPARQL_SPEC_URL,
-            collection_note=(
-                "minimum documentation/specification artifact for target identification"
-            ),
-        ),
-    ]
+            collection_note="specification evidence for target identification",
+        )
+    )
 
     mark_already_recorded(candidates, existing_artifact_urls())
     return AdapterResult(
@@ -122,12 +260,14 @@ def collect() -> AdapterResult:
         warnings=[
             "Community repository "
             f"{GEOSPARQL_EXTENDED_REPO} was observed but not collected as a "
-            "pilot artifact; it is a repository of extended community shapes, "
-            "not a specific official GeoSPARQL 1.1 SHACL resource. "
-            "It may be screened later as a separate source."
+            "pilot artifact; it may be screened later as a separate source."
         ],
         notes=[
-            "Validator URL is pinned to an exact repository commit, not main.",
+            "Primary artifacts enumerated from the fixed GeoSPARQL 1.1 manifest groups.",
+            "Catalogue metadata, agents, labels, alignments, and unrelated support "
+            "files were not collected as primary artifacts.",
+            "Authoritative provenance and normative status are recorded separately "
+            "for the SHACL validator.",
         ],
     )
 

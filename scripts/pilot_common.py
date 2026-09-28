@@ -189,13 +189,18 @@ def summarize_adapter(result: AdapterResult) -> dict[str, Any]:
     def count_type(artifact_type: str) -> int:
         return sum(1 for item in result.candidates if item.artifact_type == artifact_type)
 
+    ontology_count = count_type("ontology")
+    vocabulary_count = count_type("vocabulary")
     return {
         "source_id": result.source_id,
         "source_name": result.source_name,
         "status": result.status,
         "candidate_rows": len(result.candidates),
         "distinct_shacl_artifacts": count_type("shacl"),
-        "ontology_vocabulary_artifacts": count_type("ontology"),
+        "ontology_artifacts": ontology_count,
+        "vocabulary_artifacts": vocabulary_count,
+        "ontology_and_vocabulary_artifacts": ontology_count + vocabulary_count,
+        "profile_artifacts": count_type("profile"),
         "example_datasets": count_type("example_data"),
         "test_datasets": count_type("test_data"),
         "reports_or_documentation": count_type("documentation")
@@ -210,10 +215,13 @@ def print_adapter_summary(summary: dict[str, Any], csv_path: Path) -> None:
     print(f"status:                          {summary['status']}")
     print(f"candidate rows:                  {summary['candidate_rows']}")
     print(f"distinct SHACL artifacts:        {summary['distinct_shacl_artifacts']}")
+    print(f"ontology artifacts:              {summary['ontology_artifacts']}")
+    print(f"vocabulary artifacts:            {summary['vocabulary_artifacts']}")
     print(
-        "ontology/vocabulary artifacts:   "
-        f"{summary['ontology_vocabulary_artifacts']}"
+        "ontology + vocabulary (display): "
+        f"{summary['ontology_and_vocabulary_artifacts']}"
     )
+    print(f"profile artifacts:               {summary['profile_artifacts']}")
     print(f"example datasets:                {summary['example_datasets']}")
     print(f"test datasets:                   {summary['test_datasets']}")
     print(f"reports/documentation:           {summary['reports_or_documentation']}")

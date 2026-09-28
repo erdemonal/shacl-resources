@@ -100,12 +100,18 @@ def collect() -> AdapterResult:
                 authoritative_status=UNKNOWN,
                 intended_target="OGC Building Block instance data",
                 generation_method=UNKNOWN,
-                examples_available=UNKNOWN,
-                tests_available=UNKNOWN,
-                license=UNKNOWN,
+                examples_available="yes",
+                tests_available="yes",
+                license="Apache 2.0",
                 notes=(
                     "Distinct SHACL file referenced by one or more building blocks "
-                    "in the fixed OGC Main register snapshot."
+                    "in the fixed OGC Main register snapshot. "
+                    "For the direct owning resources "
+                    "registereditems/geo/features/feature/ and "
+                    "registereditems/geo/features/featureCollection/, the fixed "
+                    "snapshot contains examples and tests directories. The repository "
+                    "LICENSE is Apache-2.0. Individual fixture files are not "
+                    "enumerated as primary artifacts."
                 ),
                 source_snapshot=(
                     f"opengeospatial/bblocks@{OGC_COMMIT} (Main register bblocks only)"
@@ -127,8 +133,8 @@ def collect() -> AdapterResult:
         ],
         notes=[
             "Artifact unit is the distinct SHACL file URL, not the building block.",
-            "examples_available and tests_available left unknown unless verified "
-            "from artifact-level evidence.",
+            "Repository-local examples/tests are recorded as availability on the "
+            "primary SHACL artifacts rather than one row per fixture.",
         ],
     )
 

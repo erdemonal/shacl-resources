@@ -65,6 +65,7 @@ DISCOVERY_LOG_COLUMNS = [
 
 ALLOWED_ARTIFACT_TYPES = {
     "ontology",
+    "vocabulary",
     "shacl",
     "specification",
     "profile",

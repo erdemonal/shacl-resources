@@ -4,13 +4,16 @@
   "status": "processed",
   "candidate_rows": 13,
   "distinct_shacl_artifacts": 3,
-  "ontology_vocabulary_artifacts": 10,
+  "ontology_artifacts": 2,
+  "vocabulary_artifacts": 8,
+  "ontology_and_vocabulary_artifacts": 10,
+  "profile_artifacts": 0,
   "example_datasets": 0,
   "test_datasets": 0,
   "reports_or_documentation": 0,
   "warnings": [],
   "notes": [
-    "Discovery source is the official QUDT catalog, not artifacts.csv.",
+    "Resource list is a fixed expected list verified against the official QUDT 3.5.2 catalog; the catalog is evidence, not an HTML parser input.",
     "Aggregate qudt-all / shacl/qudt-all downloads were not recorded because they only package graphs already represented individually.",
     "5 candidate URL(s) already present in artifacts.csv."
   ],

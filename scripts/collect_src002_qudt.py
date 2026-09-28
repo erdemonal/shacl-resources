@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """SRC002 QUDT adapter.
 
-Fixed snapshot: QUDT 3.5.2, discovered from the official QUDT catalog.
+Fixed snapshot: QUDT 3.5.2.
 
-Collects versioned SHACL schema/overlay graphs, OWL schema graphs, and
-vocabulary graphs. Aggregate `qudt-all` distributions are noted but not
-recorded as separate artifacts.
+The resource list below is a fixed expected list manually verified against
+the official QUDT 3.5.2 catalog. The catalog is the evidence source; this
+adapter does not dynamically parse the catalog HTML.
 """
 
 from __future__ import annotations
@@ -30,7 +30,8 @@ from pilot_common import (
 CATALOG_URL = "https://www.qudt.org/catalog/qudt-catalog.html"
 VERSION = "3.5.2"
 
-# Official catalog resources for 3.5.2, excluding aggregate qudt-all downloads.
+# Fixed expected list manually verified against the official QUDT 3.5.2 catalog.
+# Aggregate qudt-all distributions are intentionally excluded.
 QUDT_RESOURCES: list[dict[str, str]] = [
     {
         "artifact_type": "shacl",
@@ -63,49 +64,49 @@ QUDT_RESOURCES: list[dict[str, str]] = [
         "intended_target": "QUDT datatype schema",
     },
     {
-        "artifact_type": "ontology",
+        "artifact_type": "vocabulary",
         "name": "QUDT Vocabulary Constants",
         "url": f"http://qudt.org/{VERSION}/vocab/constant",
         "intended_target": "QUDT constants vocabulary",
     },
     {
-        "artifact_type": "ontology",
+        "artifact_type": "vocabulary",
         "name": "QUDT Vocabulary Datatypes",
         "url": f"http://qudt.org/{VERSION}/vocab/datatype",
         "intended_target": "QUDT datatypes vocabulary",
     },
     {
-        "artifact_type": "ontology",
+        "artifact_type": "vocabulary",
         "name": "QUDT Vocabulary Dimension Vectors",
         "url": f"http://qudt.org/{VERSION}/vocab/dimensionvector",
         "intended_target": "QUDT dimension vectors vocabulary",
     },
     {
-        "artifact_type": "ontology",
+        "artifact_type": "vocabulary",
         "name": "QUDT Vocabulary Prefixes",
         "url": f"http://qudt.org/{VERSION}/vocab/prefix",
         "intended_target": "QUDT prefixes vocabulary",
     },
     {
-        "artifact_type": "ontology",
+        "artifact_type": "vocabulary",
         "name": "QUDT Vocabulary Quantity Kinds",
         "url": f"http://qudt.org/{VERSION}/vocab/quantitykind",
         "intended_target": "QUDT quantity kinds vocabulary",
     },
     {
-        "artifact_type": "ontology",
+        "artifact_type": "vocabulary",
         "name": "QUDT Vocabulary Systems of Quantity Kinds",
         "url": f"http://qudt.org/{VERSION}/vocab/soqk",
         "intended_target": "QUDT systems of quantity kinds vocabulary",
     },
     {
-        "artifact_type": "ontology",
+        "artifact_type": "vocabulary",
         "name": "QUDT Vocabulary Systems of Units",
         "url": f"http://qudt.org/{VERSION}/vocab/sou",
         "intended_target": "QUDT systems of units vocabulary",
     },
     {
-        "artifact_type": "ontology",
+        "artifact_type": "vocabulary",
         "name": "QUDT Vocabulary Units",
         "url": f"http://qudt.org/{VERSION}/vocab/unit",
         "intended_target": "QUDT units vocabulary",
@@ -135,10 +136,16 @@ def collect() -> AdapterResult:
                 examples_available=UNKNOWN,
                 tests_available=UNKNOWN,
                 license=UNKNOWN,
-                notes="Discovered from the official QUDT 3.5.2 catalog.",
+                notes=(
+                    "Fixed expected resource manually verified against the "
+                    "official QUDT 3.5.2 catalog."
+                ),
                 source_snapshot=f"QUDT {VERSION}",
                 evidence_url=CATALOG_URL,
-                collection_note="catalog-enumerated versioned graph; not from artifacts.csv",
+                collection_note=(
+                    "verified against official catalog; not dynamically parsed "
+                    "from catalog HTML"
+                ),
             )
         )
 
@@ -149,7 +156,8 @@ def collect() -> AdapterResult:
         status="processed",
         candidates=candidates,
         notes=[
-            "Discovery source is the official QUDT catalog, not artifacts.csv.",
+            "Resource list is a fixed expected list verified against the official "
+            "QUDT 3.5.2 catalog; the catalog is evidence, not an HTML parser input.",
             "Aggregate qudt-all / shacl/qudt-all downloads were not recorded "
             "because they only package graphs already represented individually.",
             f"{marked} candidate URL(s) already present in artifacts.csv.",
