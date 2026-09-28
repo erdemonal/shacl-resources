@@ -52,7 +52,7 @@ ARTIFACT_COLUMNS = [
 ]
 
 DISCOVERY_LOG_COLUMNS = [
-    "search_id",
+    "discovery_id",
     "route",
     "platform",
     "query_or_seed",
@@ -60,6 +60,7 @@ DISCOVERY_LOG_COLUMNS = [
     "result_count",
     "screened_count",
     "included_count",
+    "screening_rule",
     "notes",
 ]
 
@@ -244,15 +245,22 @@ def validate_discovery_log(
     rows: list[dict[str, str]],
     errors: list[str],
 ) -> None:
-    check_unique_ids(path, rows, "search_id", errors)
+    check_unique_ids(path, rows, "discovery_id", errors)
 
     for index, row in enumerate(rows, start=2):
-        search_id = row.get("search_id", "") or f"row {index}"
+        discovery_id = row.get("discovery_id", "") or f"row {index}"
         searched_on = row.get("searched_on", "")
+        screening_rule = row.get("screening_rule", "")
+
+        if is_blank(screening_rule):
+            errors.append(
+                f"{path}:{index}: {discovery_id}: missing required field "
+                "'screening_rule'"
+            )
 
         if not is_blank(searched_on) and not is_valid_iso_date(searched_on):
             errors.append(
-                f"{path}:{index}: {search_id}: 'searched_on' must use YYYY-MM-DD "
+                f"{path}:{index}: {discovery_id}: 'searched_on' must use YYYY-MM-DD "
                 f"when present; got {searched_on!r}"
             )
 
@@ -262,8 +270,8 @@ def validate_discovery_log(
                 continue
             if not is_non_negative_int(value):
                 errors.append(
-                    f"{path}:{index}: {search_id}: '{field}' must be a non-negative "
-                    f"integer when present; got {value!r}"
+                    f"{path}:{index}: {discovery_id}: '{field}' must be a "
+                    f"non-negative integer when present; got {value!r}"
                 )
 
 

@@ -1,43 +1,12 @@
 {
-  "canonical_rows_before": 7,
+  "state": "already_complete",
+  "canonical_rows_before": 38,
   "candidate_rows_reviewed": 38,
-  "duplicates_skipped": 7,
-  "new_rows_promoted": 31,
+  "duplicates_skipped": 38,
+  "new_rows_promoted": 0,
   "canonical_rows_after": 38,
-  "promoted_count_per_source": {
-    "SRC002": 8,
-    "SRC004": 9,
-    "SRC005": 3,
-    "SRC006": 11
-  },
-  "promoted_count_per_artifact_type": {
-    "documentation": 6,
-    "example_data": 1,
-    "ontology": 3,
-    "profile": 2,
-    "shacl": 4,
-    "specification": 1,
-    "test_data": 3,
-    "vocabulary": 11
-  },
-  "existing_artifact_ids_preserved": [
-    "ART001",
-    "ART002",
-    "ART003",
-    "ART004",
-    "ART005",
-    "ART006",
-    "ART007"
-  ],
-  "new_artifact_id_range": [
-    "ART008",
-    "ART038"
-  ],
-  "candidate_only_fields_folded_into_notes": [
-    "notes",
-    "source_snapshot",
-    "evidence_url",
-    "collection_note"
-  ],
+  "promoted_count_per_source": {},
+  "promoted_count_per_artifact_type": {},
+  "message": "Promotion already complete: all 38 reviewed candidate URLs are already represented in data/artifacts.csv. No changes made.",
   "output": "data/artifacts.csv"
 }

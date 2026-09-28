@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """Promote reviewed pilot candidates into data/artifacts.csv.
 
-Deterministic, offline, and auditable. Does not access the web, discover
-sources, or reinterpret metadata.
+Deterministic, offline, auditable, and idempotent.
+
+Supports two valid states:
+
+STATE A: artifacts.csv has the original 7 canonical rows; promote 31 new ones.
+STATE B: artifacts.csv already has all 38 reviewed candidate URLs; no changes.
+
+Any other partial or inconsistent state fails clearly.
 """
 
 from __future__ import annotations
@@ -25,11 +31,12 @@ ARTIFACTS_PATH = REPO_ROOT / "data" / "artifacts.csv"
 CANDIDATES_PATH = REPO_ROOT / "reports" / "pilot_artifact_candidates.csv"
 SUMMARY_PATH = REPO_ROOT / "reports" / "pilot_promotion_summary.json"
 
-EXPECTED_CANONICAL_BEFORE = 7
 EXPECTED_CANDIDATES = 38
-EXPECTED_DUPLICATES = 7
-EXPECTED_NEW = 31
-EXPECTED_CANONICAL_AFTER = 38
+EXPECTED_ORIGINAL_CANONICAL = 7
+EXPECTED_DUPLICATES_IN_STATE_A = 7
+EXPECTED_NEW_IN_STATE_A = 31
+EXPECTED_FINAL_CANONICAL = 38
+ORIGINAL_IDS = [f"ART{i:03d}" for i in range(1, 8)]
 
 CANONICAL_FIELD_SET = set(ARTIFACT_COLUMNS)
 CANDIDATE_ONLY_FIELDS = ("notes", "source_snapshot", "evidence_url", "collection_note")
@@ -93,25 +100,75 @@ def write_artifacts(path: Path, rows: list[dict[str, str]]) -> None:
         writer.writerows(rows)
 
 
+def validate_candidate_row(
+    index: int,
+    candidate: dict[str, str],
+    source_by_id: dict[str, dict[str, str]],
+) -> tuple[str, str]:
+    source_id = (candidate.get("source_id") or "").strip()
+    artifact_type = (candidate.get("artifact_type") or "").strip()
+    url = normalize_url(candidate.get("url", ""))
+
+    if not source_id:
+        fail(f"candidates.csv:{index}: missing source_id")
+    if source_id not in source_by_id:
+        fail(f"candidates.csv:{index}: unknown source_id {source_id!r}")
+    if source_id == "SRC001":
+        fail("SRC001 SAREF must contribute no candidate artifacts")
+
+    decision = (source_by_id[source_id].get("screening_decision") or "").strip()
+    if decision != "included":
+        fail(
+            f"candidates.csv:{index}: source {source_id} is not included "
+            f"(screening_decision={decision!r})"
+        )
+
+    if artifact_type not in ALLOWED_ARTIFACT_TYPES:
+        fail(
+            f"candidates.csv:{index}: artifact_type {artifact_type!r} is not "
+            "allowed by validate_manifest.py"
+        )
+    if not url:
+        fail(f"candidates.csv:{index}: missing url")
+    return source_id, url
+
+
+def write_summary(summary: dict) -> None:
+    SUMMARY_PATH.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+
+
+def print_summary(summary: dict) -> None:
+    print("=== Pilot promotion summary ===")
+    print(f"state:                   {summary['state']}")
+    print(f"canonical rows before:   {summary['canonical_rows_before']}")
+    print(f"candidate rows reviewed: {summary['candidate_rows_reviewed']}")
+    print(f"duplicates skipped:      {summary['duplicates_skipped']}")
+    print(f"new rows promoted:       {summary['new_rows_promoted']}")
+    print(f"canonical rows after:    {summary['canonical_rows_after']}")
+    if summary.get("message"):
+        print(f"message:                 {summary['message']}")
+    if summary.get("promoted_count_per_source"):
+        print("promoted per source:")
+        for source_id, count in summary["promoted_count_per_source"].items():
+            print(f"  - {source_id}: {count}")
+    if summary.get("promoted_count_per_artifact_type"):
+        print("promoted per artifact type:")
+        for artifact_type, count in summary["promoted_count_per_artifact_type"].items():
+            print(f"  - {artifact_type}: {count}")
+    print(f"wrote: {SUMMARY_PATH.relative_to(REPO_ROOT)}")
+
+
 def main() -> int:
     sources = load_csv(SOURCES_PATH)
     artifacts = load_csv(ARTIFACTS_PATH)
     candidates = load_csv(CANDIDATES_PATH)
 
-    if len(artifacts) != EXPECTED_CANONICAL_BEFORE:
-        fail(
-            f"expected {EXPECTED_CANONICAL_BEFORE} canonical artifacts before "
-            f"promotion; found {len(artifacts)}"
-        )
     if len(candidates) != EXPECTED_CANDIDATES:
         fail(
             f"expected {EXPECTED_CANDIDATES} candidate rows; found {len(candidates)}"
         )
 
     source_by_id = {row.get("source_id", ""): row for row in sources}
-    existing_ids = [row.get("artifact_id", "") for row in artifacts]
-    if existing_ids != [f"ART{i:03d}" for i in range(1, 8)]:
-        fail(f"unexpected existing artifact IDs: {existing_ids}")
 
     existing_urls: dict[str, str] = {}
     for row in artifacts:
@@ -122,50 +179,69 @@ def main() -> int:
             fail(f"duplicate URL already present in artifacts.csv: {url}")
         existing_urls[url] = row.get("artifact_id", "")
 
-    new_candidates: list[dict[str, str]] = []
-    duplicates_skipped = 0
-
+    candidate_urls: list[str] = []
     for index, candidate in enumerate(candidates, start=2):
-        source_id = (candidate.get("source_id") or "").strip()
-        artifact_type = (candidate.get("artifact_type") or "").strip()
-        url = normalize_url(candidate.get("url", ""))
+        _, url = validate_candidate_row(index, candidate, source_by_id)
+        candidate_urls.append(url)
 
-        if not source_id:
-            fail(f"candidates.csv:{index}: missing source_id")
-        if source_id not in source_by_id:
-            fail(f"candidates.csv:{index}: unknown source_id {source_id!r}")
-        if source_id == "SRC001":
-            fail("SRC001 SAREF must contribute no candidate artifacts")
+    if len(set(candidate_urls)) != len(candidate_urls):
+        fail("duplicate URLs found within pilot_artifact_candidates.csv")
 
-        decision = (source_by_id[source_id].get("screening_decision") or "").strip()
-        if decision != "included":
-            fail(
-                f"candidates.csv:{index}: source {source_id} is not included "
-                f"(screening_decision={decision!r})"
-            )
+    missing_from_canonical = [url for url in candidate_urls if url not in existing_urls]
+    present_in_canonical = [url for url in candidate_urls if url in existing_urls]
 
-        if artifact_type not in ALLOWED_ARTIFACT_TYPES:
-            fail(
-                f"candidates.csv:{index}: artifact_type {artifact_type!r} is not "
-                "allowed by validate_manifest.py"
-            )
-        if not url:
-            fail(f"candidates.csv:{index}: missing url")
+    # STATE B: promotion already complete.
+    if (
+        len(artifacts) == EXPECTED_FINAL_CANONICAL
+        and not missing_from_canonical
+        and len(present_in_canonical) == EXPECTED_CANDIDATES
+    ):
+        summary = {
+            "state": "already_complete",
+            "canonical_rows_before": len(artifacts),
+            "candidate_rows_reviewed": EXPECTED_CANDIDATES,
+            "duplicates_skipped": EXPECTED_CANDIDATES,
+            "new_rows_promoted": 0,
+            "canonical_rows_after": len(artifacts),
+            "promoted_count_per_source": {},
+            "promoted_count_per_artifact_type": {},
+            "message": (
+                "Promotion already complete: all 38 reviewed candidate URLs are "
+                "already represented in data/artifacts.csv. No changes made."
+            ),
+            "output": str(ARTIFACTS_PATH.relative_to(REPO_ROOT)),
+        }
+        write_summary(summary)
+        print_summary(summary)
+        return 0
 
-        if url in existing_urls:
-            duplicates_skipped += 1
-            continue
-
-        new_candidates.append(candidate)
-
-    if duplicates_skipped != EXPECTED_DUPLICATES:
+    # STATE A: original 7-row canonical inventory.
+    existing_ids = [row.get("artifact_id", "") for row in artifacts]
+    if not (
+        len(artifacts) == EXPECTED_ORIGINAL_CANONICAL
+        and existing_ids == ORIGINAL_IDS
+        and len(present_in_canonical) == EXPECTED_DUPLICATES_IN_STATE_A
+        and len(missing_from_canonical) == EXPECTED_NEW_IN_STATE_A
+    ):
         fail(
-            f"expected {EXPECTED_DUPLICATES} duplicate URLs skipped; "
-            f"found {duplicates_skipped}"
+            "inconsistent promotion state. Expected either "
+            f"(A) {EXPECTED_ORIGINAL_CANONICAL} original canonical rows with "
+            f"{EXPECTED_NEW_IN_STATE_A} new candidate URLs to promote, or "
+            f"(B) {EXPECTED_FINAL_CANONICAL} canonical rows already covering all "
+            f"{EXPECTED_CANDIDATES} candidate URLs. "
+            f"Found canonical_rows={len(artifacts)}, "
+            f"candidate_urls_already_present={len(present_in_canonical)}, "
+            f"candidate_urls_missing={len(missing_from_canonical)}."
         )
-    if len(new_candidates) != EXPECTED_NEW:
+
+    new_candidates = [
+        candidate
+        for candidate in candidates
+        if normalize_url(candidate.get("url", "")) in set(missing_from_canonical)
+    ]
+    if len(new_candidates) != EXPECTED_NEW_IN_STATE_A:
         fail(
-            f"expected {EXPECTED_NEW} new artifacts to promote; "
+            f"expected {EXPECTED_NEW_IN_STATE_A} new artifacts to promote; "
             f"found {len(new_candidates)}"
         )
 
@@ -185,9 +261,9 @@ def main() -> int:
         promoted_rows.append(candidate_to_canonical(candidate, artifact_id))
 
     merged = list(artifacts) + promoted_rows
-    if len(merged) != EXPECTED_CANONICAL_AFTER:
+    if len(merged) != EXPECTED_FINAL_CANONICAL:
         fail(
-            f"expected {EXPECTED_CANONICAL_AFTER} canonical rows after promotion; "
+            f"expected {EXPECTED_FINAL_CANONICAL} canonical rows after promotion; "
             f"found {len(merged)}"
         )
 
@@ -195,7 +271,6 @@ def main() -> int:
     if len(merged_urls) != len(set(merged_urls)):
         fail("URL uniqueness check failed after merge")
 
-    # Ensure we never wrote candidate-only columns into the canonical CSV schema.
     for row in promoted_rows:
         unexpected = set(row) - CANONICAL_FIELD_SET
         if unexpected:
@@ -206,38 +281,26 @@ def main() -> int:
     per_source = Counter(row["source_id"] for row in promoted_rows)
     per_type = Counter(row["artifact_type"] for row in promoted_rows)
     summary = {
-        "canonical_rows_before": EXPECTED_CANONICAL_BEFORE,
+        "state": "promoted",
+        "canonical_rows_before": EXPECTED_ORIGINAL_CANONICAL,
         "candidate_rows_reviewed": EXPECTED_CANDIDATES,
-        "duplicates_skipped": duplicates_skipped,
+        "duplicates_skipped": EXPECTED_DUPLICATES_IN_STATE_A,
         "new_rows_promoted": len(promoted_rows),
         "canonical_rows_after": len(merged),
         "promoted_count_per_source": dict(sorted(per_source.items())),
         "promoted_count_per_artifact_type": dict(sorted(per_type.items())),
         "existing_artifact_ids_preserved": existing_ids,
-        "new_artifact_id_range": (
-            [promoted_rows[0]["artifact_id"], promoted_rows[-1]["artifact_id"]]
-            if promoted_rows
-            else []
-        ),
+        "new_artifact_id_range": [
+            promoted_rows[0]["artifact_id"],
+            promoted_rows[-1]["artifact_id"],
+        ],
         "candidate_only_fields_folded_into_notes": list(CANDIDATE_ONLY_FIELDS),
+        "message": "Promoted 31 new reviewed candidates into data/artifacts.csv.",
         "output": str(ARTIFACTS_PATH.relative_to(REPO_ROOT)),
     }
-    SUMMARY_PATH.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-
-    print("=== Pilot promotion summary ===")
-    print(f"canonical rows before:   {summary['canonical_rows_before']}")
-    print(f"candidate rows reviewed: {summary['candidate_rows_reviewed']}")
-    print(f"duplicates skipped:      {summary['duplicates_skipped']}")
-    print(f"new rows promoted:       {summary['new_rows_promoted']}")
-    print(f"canonical rows after:    {summary['canonical_rows_after']}")
-    print("promoted per source:")
-    for source_id, count in summary["promoted_count_per_source"].items():
-        print(f"  - {source_id}: {count}")
-    print("promoted per artifact type:")
-    for artifact_type, count in summary["promoted_count_per_artifact_type"].items():
-        print(f"  - {artifact_type}: {count}")
+    write_summary(summary)
+    print_summary(summary)
     print(f"wrote: {ARTIFACTS_PATH.relative_to(REPO_ROOT)}")
-    print(f"wrote: {SUMMARY_PATH.relative_to(REPO_ROOT)}")
     return 0
 
 

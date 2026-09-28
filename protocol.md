@@ -62,7 +62,18 @@ Additional resources are identified through:
 - working groups and community initiatives;
 - links from SHACL projects already included in the collection.
 
-Each discovery action is recorded in `data/discovery_log.csv`, including the route, platform, query or seed, date, and screening counts.
+Each discovery action is recorded in `data/discovery_log.csv`, including the route, platform, query or seed, date, screening rule, and screening counts.
+
+Not every discovery action is a search. Some actions are advisor seeds, manual follow-ups, references, or sources identified during earlier project work. Each action therefore receives a `discovery_id` rather than a search-only identifier.
+
+Count fields are interpreted as follows:
+
+- a blank count means the count is not applicable or unavailable for that discovery route;
+- `0` means an actual observed zero.
+
+For named-source routes such as advisor seeds or direct follow-ups, `result_count` is left blank because no result list was retrieved. `screened_count` and `included_count` may still record the direct screening outcome.
+
+The `screening_rule` field records how results from a discovery action were screened. For named-source actions this may be a short description such as "named source screened directly". For later search-result routes it may record a cutoff such as "first 50 results in returned relevance order".
 
 The discovery process may be extended if additional useful source types are identified.
 
