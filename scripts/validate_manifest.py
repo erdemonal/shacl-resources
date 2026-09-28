@@ -24,7 +24,6 @@ SOURCE_COLUMNS = [
     "description",
     "discovery_method",
     "discovered_on",
-    "status",
     "screening_decision",
     "exclusion_reason",
     "notes",

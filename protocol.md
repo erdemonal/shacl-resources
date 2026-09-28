@@ -30,7 +30,9 @@ A resource may be included if:
 
 Example data and test cases are not required, but their presence or absence is recorded.
 
-A resource does not need to be an official standards artifact. Its status is recorded separately.
+A resource does not need to be an official standards artifact. Its authoritative status is recorded separately.
+
+Each source receives an explicit screening decision: `candidate`, `included`, or `excluded`. Excluded sources retain an exclusion reason.
 
 ## Exclusion criteria
 
@@ -60,7 +62,7 @@ Additional resources are identified through:
 - working groups and community initiatives;
 - links from SHACL projects already included in the collection.
 
-Where practical, the repository records how each source was found.
+Each discovery action is recorded in `data/discovery_log.csv`, including the route, platform, query or seed, date, and screening counts.
 
 The discovery process may be extended if additional useful source types are identified.
 
@@ -81,7 +83,8 @@ For each source, the repository records fields such as:
 - repository;
 - discovery method;
 - discovery date;
-- collection status;
+- screening decision;
+- exclusion reason, when excluded;
 - notes.
 
 ### Artifacts
