@@ -1,1 +1,6 @@
 source_id,name,organization,source_type,homepage,repository,description,discovery_method,discovered_on,status,notes
+SRC001,SAREF,ETSI,standard,https://saref.etsi.org/,,SAREF ontology and validation resources,advisor_seed,2026-09-28,candidate,"ETSI TS 104 267 is an active SHACL Shapes Repository work item."
+SRC002,QUDT,QUDT.org,ontology,https://www.qudt.org/,,QUDT ontologies and SHACL schema graphs,advisor_seed,2026-09-28,candidate,"Current catalog publishes versioned OWL and SHACL graphs."
+SRC003,OGC Building Blocks,Open Geospatial Consortium,specification_ecosystem,https://blocks.ogc.org/,https://github.com/opengeospatial/bblocks,Reusable specification components with schemas SHACL rules tests and profile declarations,advisor_seed,2026-09-28,candidate,
+SRC004,GeoSPARQL,Open Geospatial Consortium,standard,https://www.ogc.org/standards/geosparql/,https://github.com/opengeospatial/ogc-geosparql,GeoSPARQL standard and associated SHACL resources,advisor_seed,2026-09-28,candidate,
+SRC005,DCAT-AP,SEMIC / European Commission,application_profile,https://interoperable-europe.ec.europa.eu/collection/semic-support-centre/solution/dcat-application-profile-data-portals-europe,https://github.com/SEMICeu/DCAT-AP,DCAT application profile with versioned SHACL constraints,advisor_seed,2026-09-28,candidate,
