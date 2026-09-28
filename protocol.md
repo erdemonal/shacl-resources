@@ -199,6 +199,14 @@ The original source URL is preserved, together with the repository path or commi
 
 Checksums may later be added for downloaded artifacts to make it possible to verify the exact retrieved file.
 
+## Material availability
+
+Material availability was assessed within the fixed snapshot recorded for each source. Linked external repositories or deposits were not searched unless they were the selected snapshot.
+
+`verified_yes` means the material was found in the selected snapshot. `not_verified` means it was not found in the selected snapshot during this assessment. It does not mean the material does not exist.
+
+`profiles_or_versions` counts distinct SHACL shape sets, profiles, or shape versions in the selected snapshot. Versions of the validation target are not counted.
+
 ## Duplicate handling
 
 Duplicates are checked at both the source and artifact levels.
