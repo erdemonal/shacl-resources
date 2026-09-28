@@ -113,6 +113,30 @@ For each artifact, the repository records fields such as:
 
 Missing information is recorded as unknown rather than inferred.
 
+## Artifact collection
+
+After a source is included, artifacts are collected from one fixed reference snapshot of that source.
+
+A current stable or recommended release is preferred when one exists. If no such release is available, an exact repository commit or a persistent record such as a DOI is used instead.
+
+Within the selected snapshot, all artifacts that fall within the collection scope are recorded. Artifacts are not selected because they appear interesting for a possible research question.
+
+The initial collection scope covers:
+
+- SHACL shapes;
+- ontology or vocabulary artifacts;
+- specification or profile documents needed to identify the validation target;
+- example RDF data;
+- test RDF data;
+- validation reports;
+- documentation that explains the SHACL artifact or its intended target.
+
+Material that is not part of this scope, such as build logs, logos, stylesheets, or other website assets, is not recorded as corpus artifacts.
+
+Historical versions are not collected during the initial pilot unless they are needed to identify or interpret the selected artifact. If later analysis shows that version comparison is research-worthy, the protocol can be extended for that purpose.
+
+If a source exposes a machine-readable registry, all qualifying entries are enumerated from that registry rather than selected manually. For example, when a register lists building blocks with associated SHACL shapes, every entry with a non-empty SHACL field in the fixed register snapshot is recorded.
+
 ## Versioning and provenance
 
 Version information is recorded whenever it is available.
