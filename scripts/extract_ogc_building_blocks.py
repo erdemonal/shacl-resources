@@ -1,10 +1,4 @@
 #!/usr/bin/env python3
-"""Enumerate SHACL-bearing OGC Building Blocks from a fixed register snapshot.
-
-Reads register.json from one pinned repository commit and writes a reviewable
-CSV report. Does not modify data/artifacts.csv.
-"""
-
 from __future__ import annotations
 
 import csv
