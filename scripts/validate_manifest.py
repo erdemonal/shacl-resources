@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Validate sources.csv and artifacts.csv manifests."""
+"""Validate sources.csv, artifacts.csv, and discovery_log.csv manifests."""
 
 from __future__ import annotations
 
 import csv
+import re
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
@@ -11,6 +12,7 @@ from urllib.parse import urlparse
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SOURCES_PATH = REPO_ROOT / "data" / "sources.csv"
 ARTIFACTS_PATH = REPO_ROOT / "data" / "artifacts.csv"
+DISCOVERY_LOG_PATH = REPO_ROOT / "data" / "discovery_log.csv"
 
 SOURCE_COLUMNS = [
     "source_id",
@@ -23,6 +25,8 @@ SOURCE_COLUMNS = [
     "discovery_method",
     "discovered_on",
     "status",
+    "screening_decision",
+    "exclusion_reason",
     "notes",
 ]
 
@@ -45,6 +49,18 @@ ARTIFACT_COLUMNS = [
     "tests_available",
     "license",
     "local_path",
+    "notes",
+]
+
+DISCOVERY_LOG_COLUMNS = [
+    "search_id",
+    "route",
+    "platform",
+    "query_or_seed",
+    "searched_on",
+    "result_count",
+    "screened_count",
+    "included_count",
     "notes",
 ]
 
@@ -73,10 +89,19 @@ ALLOWED_GENERATION_METHODS = {
     "unknown",
 }
 
+ALLOWED_SCREENING_DECISIONS = {
+    "candidate",
+    "included",
+    "excluded",
+}
+
 URL_FIELDS = {
     "sources": ("homepage", "repository"),
     "artifacts": ("url",),
 }
+
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+DISCOVERY_COUNT_FIELDS = ("result_count", "screened_count", "included_count")
 
 
 def is_blank(value: str | None) -> bool:
@@ -86,6 +111,17 @@ def is_blank(value: str | None) -> bool:
 def is_valid_url(value: str) -> bool:
     parsed = urlparse(value.strip())
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def is_valid_iso_date(value: str) -> bool:
+    return bool(DATE_RE.fullmatch(value.strip()))
+
+
+def is_non_negative_int(value: str) -> bool:
+    text = value.strip()
+    if not text.isdigit():
+        return False
+    return int(text) >= 0
 
 
 def load_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
@@ -172,6 +208,65 @@ def check_unique_ids(
     return ids
 
 
+def validate_screening_decisions(
+    path: Path,
+    rows: list[dict[str, str]],
+    errors: list[str],
+) -> None:
+    for index, row in enumerate(rows, start=2):
+        source_id = row.get("source_id", "") or f"row {index}"
+        decision = row.get("screening_decision", "").strip()
+        reason = row.get("exclusion_reason", "").strip()
+
+        if is_blank(decision):
+            errors.append(
+                f"{path}:{index}: {source_id}: missing required field 'screening_decision'"
+            )
+            continue
+
+        if decision not in ALLOWED_SCREENING_DECISIONS:
+            allowed_text = ", ".join(sorted(ALLOWED_SCREENING_DECISIONS))
+            errors.append(
+                f"{path}:{index}: {source_id}: invalid 'screening_decision' value "
+                f"{decision!r}; allowed: {allowed_text}"
+            )
+            continue
+
+        if decision == "excluded" and is_blank(reason):
+            errors.append(
+                f"{path}:{index}: {source_id}: excluded sources must have an "
+                "exclusion_reason"
+            )
+
+
+def validate_discovery_log(
+    path: Path,
+    rows: list[dict[str, str]],
+    errors: list[str],
+) -> None:
+    check_unique_ids(path, rows, "search_id", errors)
+
+    for index, row in enumerate(rows, start=2):
+        search_id = row.get("search_id", "") or f"row {index}"
+        searched_on = row.get("searched_on", "")
+
+        if not is_blank(searched_on) and not is_valid_iso_date(searched_on):
+            errors.append(
+                f"{path}:{index}: {search_id}: 'searched_on' must use YYYY-MM-DD "
+                f"when present; got {searched_on!r}"
+            )
+
+        for field in DISCOVERY_COUNT_FIELDS:
+            value = row.get(field, "")
+            if is_blank(value):
+                continue
+            if not is_non_negative_int(value):
+                errors.append(
+                    f"{path}:{index}: {search_id}: '{field}' must be a non-negative "
+                    f"integer when present; got {value!r}"
+                )
+
+
 def validate_manifest() -> int:
     errors: list[str] = []
     warnings: list[str] = []
@@ -180,6 +275,8 @@ def validate_manifest() -> int:
         errors.append(f"missing file: {SOURCES_PATH}")
     if not ARTIFACTS_PATH.exists():
         errors.append(f"missing file: {ARTIFACTS_PATH}")
+    if not DISCOVERY_LOG_PATH.exists():
+        errors.append(f"missing file: {DISCOVERY_LOG_PATH}")
 
     if errors:
         for message in errors:
@@ -189,9 +286,13 @@ def validate_manifest() -> int:
 
     source_fields, source_rows = load_csv(SOURCES_PATH)
     artifact_fields, artifact_rows = load_csv(ARTIFACTS_PATH)
+    discovery_fields, discovery_rows = load_csv(DISCOVERY_LOG_PATH)
 
     check_required_columns(SOURCES_PATH, source_fields, SOURCE_COLUMNS, errors)
     check_required_columns(ARTIFACTS_PATH, artifact_fields, ARTIFACT_COLUMNS, errors)
+    check_required_columns(
+        DISCOVERY_LOG_PATH, discovery_fields, DISCOVERY_LOG_COLUMNS, errors
+    )
 
     source_ids = check_unique_ids(SOURCES_PATH, source_rows, "source_id", errors)
     check_unique_ids(ARTIFACTS_PATH, artifact_rows, "artifact_id", errors)
@@ -210,6 +311,9 @@ def validate_manifest() -> int:
         "artifact_id",
         errors,
     )
+
+    validate_screening_decisions(SOURCES_PATH, source_rows, errors)
+    validate_discovery_log(DISCOVERY_LOG_PATH, discovery_rows, errors)
 
     validate_enum(
         ARTIFACTS_PATH,
@@ -287,7 +391,8 @@ def validate_manifest() -> int:
 
     print(
         f"Validation passed with {len(warnings)} warning(s). "
-        f"Checked {len(source_rows)} source(s) and {len(artifact_rows)} artifact(s)."
+        f"Checked {len(source_rows)} source(s), {len(artifact_rows)} artifact(s), "
+        f"and {len(discovery_rows)} discovery log row(s)."
     )
     return 0
 
