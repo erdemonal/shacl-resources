@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate sources.csv, artifacts.csv, and discovery_log.csv manifests."""
+"""Validate sources.csv, artifacts.csv, discovery_log.csv, and discovery_results.csv."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SOURCES_PATH = REPO_ROOT / "data" / "sources.csv"
 ARTIFACTS_PATH = REPO_ROOT / "data" / "artifacts.csv"
 DISCOVERY_LOG_PATH = REPO_ROOT / "data" / "discovery_log.csv"
+DISCOVERY_RESULTS_PATH = REPO_ROOT / "data" / "discovery_results.csv"
 
 SOURCE_COLUMNS = [
     "source_id",
@@ -64,6 +65,18 @@ DISCOVERY_LOG_COLUMNS = [
     "notes",
 ]
 
+DISCOVERY_RESULTS_COLUMNS = [
+    "discovery_id",
+    "result_rank",
+    "repository",
+    "path",
+    "url",
+    "screening_decision",
+    "source_id",
+    "exclusion_reason",
+    "notes",
+]
+
 ALLOWED_ARTIFACT_TYPES = {
     "ontology",
     "vocabulary",
@@ -94,6 +107,13 @@ ALLOWED_SCREENING_DECISIONS = {
     "candidate",
     "included",
     "excluded",
+}
+
+ALLOWED_RESULT_SCREENING_DECISIONS = {
+    "candidate",
+    "included",
+    "excluded",
+    "duplicate",
 }
 
 URL_FIELDS = {
@@ -275,6 +295,71 @@ def validate_discovery_log(
                 )
 
 
+def validate_discovery_results(
+    path: Path,
+    rows: list[dict[str, str]],
+    source_ids: set[str],
+    errors: list[str],
+) -> None:
+    seen_pairs: dict[tuple[str, str], int] = {}
+
+    for index, row in enumerate(rows, start=2):
+        discovery_id = (row.get("discovery_id") or "").strip()
+        result_rank = (row.get("result_rank") or "").strip()
+        decision = (row.get("screening_decision") or "").strip()
+        source_id = (row.get("source_id") or "").strip()
+        exclusion_reason = (row.get("exclusion_reason") or "").strip()
+        row_label = discovery_id or f"row {index}"
+
+        if is_blank(discovery_id):
+            errors.append(
+                f"{path}:{index}: missing required field 'discovery_id'"
+            )
+
+        if is_blank(result_rank):
+            errors.append(
+                f"{path}:{index}: {row_label}: missing required field 'result_rank'"
+            )
+        elif not is_non_negative_int(result_rank):
+            errors.append(
+                f"{path}:{index}: {row_label}: 'result_rank' must be a non-negative "
+                f"integer; got {result_rank!r}"
+            )
+        else:
+            pair = (discovery_id, result_rank)
+            if pair in seen_pairs:
+                errors.append(
+                    f"{path}:{index}: {row_label}: duplicate "
+                    f"(discovery_id, result_rank)=({discovery_id!r}, {result_rank!r}); "
+                    f"first seen at line {seen_pairs[pair]}"
+                )
+            else:
+                seen_pairs[pair] = index
+
+        if is_blank(decision):
+            errors.append(
+                f"{path}:{index}: {row_label}: missing required field "
+                "'screening_decision'"
+            )
+        elif decision not in ALLOWED_RESULT_SCREENING_DECISIONS:
+            allowed_text = ", ".join(sorted(ALLOWED_RESULT_SCREENING_DECISIONS))
+            errors.append(
+                f"{path}:{index}: {row_label}: invalid 'screening_decision' value "
+                f"{decision!r}; allowed: {allowed_text}"
+            )
+
+        if not is_blank(source_id) and source_id not in source_ids:
+            errors.append(
+                f"{path}:{index}: {row_label}: unknown source_id {source_id!r}"
+            )
+
+        if decision == "excluded" and is_blank(exclusion_reason):
+            errors.append(
+                f"{path}:{index}: {row_label}: excluded results must have an "
+                "exclusion_reason"
+            )
+
+
 def validate_manifest() -> int:
     errors: list[str] = []
     warnings: list[str] = []
@@ -285,6 +370,8 @@ def validate_manifest() -> int:
         errors.append(f"missing file: {ARTIFACTS_PATH}")
     if not DISCOVERY_LOG_PATH.exists():
         errors.append(f"missing file: {DISCOVERY_LOG_PATH}")
+    if not DISCOVERY_RESULTS_PATH.exists():
+        errors.append(f"missing file: {DISCOVERY_RESULTS_PATH}")
 
     if errors:
         for message in errors:
@@ -295,11 +382,15 @@ def validate_manifest() -> int:
     source_fields, source_rows = load_csv(SOURCES_PATH)
     artifact_fields, artifact_rows = load_csv(ARTIFACTS_PATH)
     discovery_fields, discovery_rows = load_csv(DISCOVERY_LOG_PATH)
+    result_fields, result_rows = load_csv(DISCOVERY_RESULTS_PATH)
 
     check_required_columns(SOURCES_PATH, source_fields, SOURCE_COLUMNS, errors)
     check_required_columns(ARTIFACTS_PATH, artifact_fields, ARTIFACT_COLUMNS, errors)
     check_required_columns(
         DISCOVERY_LOG_PATH, discovery_fields, DISCOVERY_LOG_COLUMNS, errors
+    )
+    check_required_columns(
+        DISCOVERY_RESULTS_PATH, result_fields, DISCOVERY_RESULTS_COLUMNS, errors
     )
 
     source_ids = check_unique_ids(SOURCES_PATH, source_rows, "source_id", errors)
@@ -322,6 +413,9 @@ def validate_manifest() -> int:
 
     validate_screening_decisions(SOURCES_PATH, source_rows, errors)
     validate_discovery_log(DISCOVERY_LOG_PATH, discovery_rows, errors)
+    validate_discovery_results(
+        DISCOVERY_RESULTS_PATH, result_rows, source_ids, errors
+    )
 
     validate_enum(
         ARTIFACTS_PATH,
@@ -400,7 +494,8 @@ def validate_manifest() -> int:
     print(
         f"Validation passed with {len(warnings)} warning(s). "
         f"Checked {len(source_rows)} source(s), {len(artifact_rows)} artifact(s), "
-        f"and {len(discovery_rows)} discovery log row(s)."
+        f"{len(discovery_rows)} discovery log row(s), "
+        f"and {len(result_rows)} discovery result row(s)."
     )
     return 0
 

@@ -75,6 +75,8 @@ For named-source routes such as advisor seeds or direct follow-ups, `result_coun
 
 The `screening_rule` field records how results from a discovery action were screened. For named-source actions this may be a short description such as "named source screened directly". For later search-result routes it may record a cutoff such as "first 50 results in returned relevance order".
 
+For search-result discovery routes, individual screened results are recorded in `data/discovery_results.csv` so that result-level inclusion and exclusion can be audited. `data/discovery_log.csv` remains the action-level summary.
+
 The discovery process may be extended if additional useful source types are identified.
 
 ## Metadata
