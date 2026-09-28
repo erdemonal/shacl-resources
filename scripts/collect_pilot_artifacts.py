@@ -50,6 +50,29 @@ ADAPTERS: list[tuple[str, object]] = [
     ("odct", collect_src006_odct),
 ]
 
+EXPECTED_SCREENING: dict[str, str] = {
+    "SRC001": "candidate",
+    "SRC002": "included",
+    "SRC003": "included",
+    "SRC004": "included",
+    "SRC005": "included",
+    "SRC006": "included",
+}
+
+
+def validate_screening_decisions(sources: list[dict[str, str]]) -> None:
+    by_id = {row.get("source_id", ""): row for row in sources}
+    for source_id, expected in EXPECTED_SCREENING.items():
+        row = by_id.get(source_id)
+        if row is None:
+            fail(f"sources.csv missing required pilot source {source_id}")
+        actual = (row.get("screening_decision") or "").strip()
+        if actual != expected:
+            fail(
+                f"{source_id} screening_decision must be {expected!r} for this "
+                f"pilot collector run; found {actual!r}"
+            )
+
 
 def deduplicate(candidates: list[Candidate]) -> tuple[list[Candidate], int]:
     unique: list[Candidate] = []
@@ -163,10 +186,7 @@ def main() -> int:
         fail(f"missing {SOURCES_PATH}")
 
     sources = load_csv(SOURCES_PATH)
-    source_ids = {row.get("source_id", "") for row in sources}
-    for required in ["SRC001", "SRC002", "SRC003", "SRC004", "SRC005", "SRC006"]:
-        if required not in source_ids:
-            fail(f"sources.csv missing required pilot source {required}")
+    validate_screening_decisions(sources)
 
     results: list[AdapterResult] = []
     all_candidates: list[Candidate] = []

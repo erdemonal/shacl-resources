@@ -2,15 +2,17 @@
   "source_id": "SRC005",
   "source_name": "DCAT-AP",
   "status": "processed",
-  "candidate_rows": 10,
-  "distinct_shacl_artifacts": 9,
+  "candidate_rows": 3,
+  "distinct_shacl_artifacts": 2,
   "ontology_vocabulary_artifacts": 0,
   "example_datasets": 0,
   "test_datasets": 0,
   "reports_or_documentation": 1,
   "warnings": [],
   "notes": [
-    "Historical DCAT-AP releases are outside this pilot snapshot."
+    "Pilot selection uses only releases/3.0.1/shacl/ (dcat-ap-SHACL.ttl, ranges.ttl).",
+    "releases/3.0.1/html/shacl/ is not enumerated here because it contains supporting HTML/source material, including non-SHACL import helpers and files that retain 3.0.0 identifiers.",
+    "Historical DCAT-AP releases remain outside this pilot snapshot."
   ],
   "outputs": {
     "candidates_csv": "reports/candidates/SRC005_dcat_ap.csv",

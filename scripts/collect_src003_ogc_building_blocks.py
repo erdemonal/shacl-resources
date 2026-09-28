@@ -100,9 +100,9 @@ def collect() -> AdapterResult:
                 authoritative_status=UNKNOWN,
                 intended_target="OGC Building Block instance data",
                 generation_method=UNKNOWN,
-                examples_available="yes",
-                tests_available="yes",
-                license="Apache 2.0",
+                examples_available=UNKNOWN,
+                tests_available=UNKNOWN,
+                license=UNKNOWN,
                 notes=(
                     "Distinct SHACL file referenced by one or more building blocks "
                     "in the fixed OGC Main register snapshot."
@@ -126,7 +126,9 @@ def collect() -> AdapterResult:
             "imported external registers are not recursively collected."
         ],
         notes=[
-            "Artifact unit is the distinct SHACL file URL, not the building block."
+            "Artifact unit is the distinct SHACL file URL, not the building block.",
+            "examples_available and tests_available left unknown unless verified "
+            "from artifact-level evidence.",
         ],
     )
 

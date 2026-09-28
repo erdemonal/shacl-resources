@@ -3,8 +3,13 @@
 
 Fixed snapshot: SEMICeu/DCAT-AP release 3.0.1.
 
-Enumerates all SHACL-related Turtle files under the selected release directories.
-Does not include historical releases.
+Collects only the dedicated published release SHACL directory:
+
+  releases/3.0.1/shacl/
+
+plus the release index as the minimum documentation artifact.
+
+Does not enumerate releases/3.0.1/html/shacl in this pilot.
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ from pilot_common import (
     fail,
     http_get_json,
     mark_already_recorded,
+    require_url,
     run_adapter,
 )
 
@@ -33,10 +39,7 @@ DCAT_AP_API_SHACL = (
     f"https://api.github.com/repos/SEMICeu/DCAT-AP/contents/"
     f"releases/{DCAT_AP_TAG}/shacl?ref={DCAT_AP_TAG}"
 )
-DCAT_AP_API_HTML_SHACL = (
-    f"https://api.github.com/repos/SEMICeu/DCAT-AP/contents/"
-    f"releases/{DCAT_AP_TAG}/html/shacl?ref={DCAT_AP_TAG}"
-)
+EXPECTED_SHACL_FILES = {"dcat-ap-SHACL.ttl", "ranges.ttl"}
 
 
 def list_ttl_files(api_url: str) -> list[dict[str, Any]]:
@@ -55,38 +58,24 @@ def list_ttl_files(api_url: str) -> list[dict[str, Any]]:
     return files
 
 
-def filename_role_note(name: str) -> str:
-    lower = name.lower()
-    if "recommended" in lower:
-        return "filename indicates recommended constraints"
-    if lower.startswith("range"):
-        return "filename indicates range constraints"
-    if "deprecated" in lower:
-        return "filename indicates deprecated URI constraints"
-    if "import" in lower:
-        return "filename indicates imports"
-    if "mdr" in lower:
-        return "filename indicates MDR vocabulary constraints"
-    if "shape" in lower or "shacl" in lower:
-        return "filename indicates SHACL shapes"
-    return ""
-
-
 def collect() -> AdapterResult:
-    files = list_ttl_files(DCAT_AP_API_SHACL) + list_ttl_files(DCAT_AP_API_HTML_SHACL)
+    files = list_ttl_files(DCAT_AP_API_SHACL)
+    names = {str(item.get("name") or "") for item in files}
+    if names != EXPECTED_SHACL_FILES:
+        fail(
+            "DCAT-AP 3.0.1 releases/3.0.1/shacl/ contents differ from expected "
+            f"{sorted(EXPECTED_SHACL_FILES)}; found {sorted(names)}"
+        )
 
     candidates: list[Candidate] = []
-    seen_paths: set[str] = set()
-    for item in files:
+    for item in sorted(files, key=lambda row: str(row.get("name") or "")):
         path = str(item.get("path") or "")
         name = str(item.get("name") or "")
-        if not path or path in seen_paths:
-            continue
-        seen_paths.add(path)
         url = (
             f"https://raw.githubusercontent.com/SEMICeu/DCAT-AP/"
             f"{DCAT_AP_TAG}/{path}"
         )
+        require_url(url, name)
         candidates.append(
             Candidate(
                 source_id="SRC005",
@@ -101,29 +90,34 @@ def collect() -> AdapterResult:
                 intended_target="DCAT-AP metadata records",
                 profile_name="DCAT-AP",
                 generation_method=UNKNOWN,
-                examples_available="yes",
+                examples_available=UNKNOWN,
                 tests_available=UNKNOWN,
                 license=UNKNOWN,
-                notes=filename_role_note(name),
+                notes="Published under the dedicated releases/3.0.1/shacl/ directory.",
                 source_snapshot=f"SEMICeu/DCAT-AP release {DCAT_AP_TAG}",
                 evidence_url=(
                     f"https://github.com/SEMICeu/DCAT-AP/tree/{DCAT_AP_TAG}/"
-                    f"releases/{DCAT_AP_TAG}"
+                    f"releases/{DCAT_AP_TAG}/shacl"
                 ),
-                collection_note="enumerated from fixed 3.0.1 release SHACL directories",
+                collection_note=(
+                    "enumerated only from releases/3.0.1/shacl/; "
+                    "html/shacl excluded from this pilot"
+                ),
             )
         )
 
+    index_url = (
+        f"https://raw.githubusercontent.com/SEMICeu/DCAT-AP/"
+        f"{DCAT_AP_TAG}/releases/{DCAT_AP_TAG}/index.html"
+    )
+    require_url(index_url, "DCAT-AP 3.0.1 release index")
     candidates.append(
         Candidate(
             source_id="SRC005",
             artifact_type="documentation",
             name="DCAT-AP 3.0.1 Release Index",
             version=DCAT_AP_TAG,
-            url=(
-                f"https://raw.githubusercontent.com/SEMICeu/DCAT-AP/"
-                f"{DCAT_AP_TAG}/releases/{DCAT_AP_TAG}/index.html"
-            ),
+            url=index_url,
             repository_path=f"releases/{DCAT_AP_TAG}/index.html",
             commit_or_release=DCAT_AP_TAG,
             format="html",
@@ -131,7 +125,7 @@ def collect() -> AdapterResult:
             intended_target="DCAT-AP 3.0.1",
             profile_name="DCAT-AP",
             generation_method=UNKNOWN,
-            examples_available="yes",
+            examples_available=UNKNOWN,
             tests_available=UNKNOWN,
             license=UNKNOWN,
             notes=(
@@ -153,7 +147,14 @@ def collect() -> AdapterResult:
         source_name="DCAT-AP",
         status="processed",
         candidates=candidates,
-        notes=["Historical DCAT-AP releases are outside this pilot snapshot."],
+        notes=[
+            "Pilot selection uses only releases/3.0.1/shacl/ "
+            f"({', '.join(sorted(EXPECTED_SHACL_FILES))}).",
+            "releases/3.0.1/html/shacl/ is not enumerated here because it "
+            "contains supporting HTML/source material, including non-SHACL "
+            "import helpers and files that retain 3.0.0 identifiers.",
+            "Historical DCAT-AP releases remain outside this pilot snapshot.",
+        ],
     )
 
 

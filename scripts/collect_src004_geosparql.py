@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """SRC004 GeoSPARQL adapter.
 
-Fixed snapshot: GeoSPARQL 1.1.
+Fixed snapshot: GeoSPARQL 1.1 validator pinned to
+opengeospatial/geosemantics-semantic-resources commit
+658d2ad16e4c28a786ff657a8517fa8f7c50abe7
 
-Collects:
-- the official informative SHACL RDF validator;
-- the minimum specification document needed to identify target and status;
-- the separate community extended-shapes repository as a distinct candidate.
+Collects only the official informative SHACL validator and the minimum
+specification document. Community extended shapes are noted for later
+screening, not collected as pilot artifacts.
 """
 
 from __future__ import annotations
@@ -26,13 +27,18 @@ from pilot_common import (
     fail,
     http_get_text,
     mark_already_recorded,
+    require_url,
     run_adapter,
 )
 
+GEOSPARQL_COMMIT = "658d2ad16e4c28a786ff657a8517fa8f7c50abe7"
+GEOSPARQL_VALIDATOR_PATH = (
+    "resources/geosparql-swg/geosparql-1.1/validators/geo-validator.ttl"
+)
 GEOSPARQL_VALIDATOR_URL = (
     "https://raw.githubusercontent.com/opengeospatial/"
-    "geosemantics-semantic-resources/main/resources/geosparql-swg/"
-    "geosparql-1.1/validators/geo-validator.ttl"
+    f"geosemantics-semantic-resources/{GEOSPARQL_COMMIT}/"
+    f"{GEOSPARQL_VALIDATOR_PATH}"
 )
 GEOSPARQL_VALIDATOR_IRI = "http://www.opengis.net/def/geosparql/validator"
 GEOSPARQL_SPEC_URL = "https://docs.ogc.org/is/22-047r1/22-047r1.html"
@@ -40,6 +46,9 @@ GEOSPARQL_EXTENDED_REPO = "https://github.com/opengeospatial/ogc-geosparql-shape
 
 
 def collect() -> AdapterResult:
+    require_url(GEOSPARQL_VALIDATOR_URL, "GeoSPARQL 1.1 validator")
+    require_url(GEOSPARQL_SPEC_URL, "GeoSPARQL 1.1 specification")
+
     validator_text = http_get_text(GEOSPARQL_VALIDATOR_URL)
     if "sh:NodeShape" not in validator_text and "sh:PropertyShape" not in validator_text:
         fail("GeoSPARQL validator file does not look like a SHACL shapes graph")
@@ -56,24 +65,27 @@ def collect() -> AdapterResult:
             name="GeoSPARQL 1.1 RDF Shapes Validator",
             version="1.1",
             url=GEOSPARQL_VALIDATOR_URL,
-            repository_path=(
-                "resources/geosparql-swg/geosparql-1.1/validators/geo-validator.ttl"
-            ),
-            commit_or_release="GeoSPARQL 1.1",
+            repository_path=GEOSPARQL_VALIDATOR_PATH,
+            commit_or_release=GEOSPARQL_COMMIT,
             format="turtle",
             authoritative_status=UNKNOWN,
             intended_target="GeoSPARQL 1.1 RDF data",
             generation_method=UNKNOWN,
             examples_available=UNKNOWN,
             tests_available=UNKNOWN,
-            license="Apache 2.0",
+            license=UNKNOWN,
             notes=(
                 f"Canonical IRI: {GEOSPARQL_VALIDATOR_IRI}. "
                 "As of GeoSPARQL 1.1 this validator is informative, not normative."
             ),
-            source_snapshot="GeoSPARQL 1.1 official validator",
+            source_snapshot=(
+                f"geosemantics-semantic-resources@{GEOSPARQL_COMMIT} / GeoSPARQL 1.1"
+            ),
             evidence_url=GEOSPARQL_SPEC_URL,
-            collection_note="official core validator; informative status recorded",
+            collection_note=(
+                "official core validator pinned to exact repository commit; "
+                "informative status recorded"
+            ),
         ),
         Candidate(
             source_id="SRC004",
@@ -99,31 +111,6 @@ def collect() -> AdapterResult:
                 "minimum documentation/specification artifact for target identification"
             ),
         ),
-        Candidate(
-            source_id="SRC004",
-            artifact_type="shacl",
-            name="GeoSPARQL Extended Shapes Repository",
-            version=UNKNOWN,
-            url=GEOSPARQL_EXTENDED_REPO,
-            commit_or_release=UNKNOWN,
-            format=UNKNOWN,
-            authoritative_status="community",
-            intended_target="GeoSPARQL scenario-specific constraints",
-            generation_method=UNKNOWN,
-            examples_available=UNKNOWN,
-            tests_available=UNKNOWN,
-            license=UNKNOWN,
-            notes=(
-                "Separate community-contributed extended shapes repository. "
-                "Not mixed with the official GeoSPARQL 1.1 core validator."
-            ),
-            source_snapshot="opengeospatial/ogc-geosparql-shapes (community)",
-            evidence_url=GEOSPARQL_EXTENDED_REPO,
-            collection_note=(
-                "reported separately with community status; "
-                "not expanded in this pilot pass"
-            ),
-        ),
     ]
 
     mark_already_recorded(candidates, existing_artifact_urls())
@@ -132,8 +119,15 @@ def collect() -> AdapterResult:
         source_name="GeoSPARQL",
         status="processed",
         candidates=candidates,
+        warnings=[
+            "Community repository "
+            f"{GEOSPARQL_EXTENDED_REPO} was observed but not collected as a "
+            "pilot artifact; it is a repository of extended community shapes, "
+            "not a specific official GeoSPARQL 1.1 SHACL resource. "
+            "It may be screened later as a separate source."
+        ],
         notes=[
-            "Official core validator and community extended shapes are kept separate."
+            "Validator URL is pinned to an exact repository commit, not main.",
         ],
     )
 

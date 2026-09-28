@@ -18,8 +18,8 @@
     "SRC001"
   ],
   "candidate_rows": 31,
-  "distinct_shacl_artifacts": 17,
-  "ontology_vocabulary_artifacts": 2,
+  "distinct_shacl_artifacts": 9,
+  "ontology_vocabulary_artifacts": 10,
   "example_datasets": 1,
   "test_datasets": 3,
   "reports_or_documentation": 8,
@@ -28,6 +28,7 @@
   "warnings": [
     "SRC001 SAREF skipped: screened candidate only; ETSI TS 104 267 SHACL Shapes Repository is not yet publicly available.",
     "OGC adapter inspects only the Main register bblocks array; imported external registers are not recursively collected.",
+    "Community repository https://github.com/opengeospatial/ogc-geosparql-shapes was observed but not collected as a pilot artifact; it is a repository of extended community shapes, not a specific official GeoSPARQL 1.1 SHACL resource. It may be screened later as a separate source.",
     "ODCT skipped out-of-scope file: Demo_Video_ODCT.mp4"
   ],
   "per_source_outputs": [
@@ -41,7 +42,7 @@
       "source_id": "SRC002",
       "source_name": "QUDT",
       "status": "processed",
-      "candidate_rows": 5
+      "candidate_rows": 13
     },
     {
       "source_id": "SRC003",
@@ -53,13 +54,13 @@
       "source_id": "SRC004",
       "source_name": "GeoSPARQL",
       "status": "processed",
-      "candidate_rows": 3
+      "candidate_rows": 2
     },
     {
       "source_id": "SRC005",
       "source_name": "DCAT-AP",
       "status": "processed",
-      "candidate_rows": 10
+      "candidate_rows": 3
     },
     {
       "source_id": "SRC006",

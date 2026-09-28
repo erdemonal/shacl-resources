@@ -12,7 +12,8 @@
     "OGC adapter inspects only the Main register bblocks array; imported external registers are not recursively collected."
   ],
   "notes": [
-    "Artifact unit is the distinct SHACL file URL, not the building block."
+    "Artifact unit is the distinct SHACL file URL, not the building block.",
+    "examples_available and tests_available left unknown unless verified from artifact-level evidence."
   ],
   "outputs": {
     "candidates_csv": "reports/candidates/SRC003_ogc_building_blocks.csv",

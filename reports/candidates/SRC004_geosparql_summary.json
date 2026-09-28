@@ -2,15 +2,17 @@
   "source_id": "SRC004",
   "source_name": "GeoSPARQL",
   "status": "processed",
-  "candidate_rows": 3,
-  "distinct_shacl_artifacts": 2,
+  "candidate_rows": 2,
+  "distinct_shacl_artifacts": 1,
   "ontology_vocabulary_artifacts": 0,
   "example_datasets": 0,
   "test_datasets": 0,
   "reports_or_documentation": 1,
-  "warnings": [],
+  "warnings": [
+    "Community repository https://github.com/opengeospatial/ogc-geosparql-shapes was observed but not collected as a pilot artifact; it is a repository of extended community shapes, not a specific official GeoSPARQL 1.1 SHACL resource. It may be screened later as a separate source."
+  ],
   "notes": [
-    "Official core validator and community extended shapes are kept separate."
+    "Validator URL is pinned to an exact repository commit, not main."
   ],
   "outputs": {
     "candidates_csv": "reports/candidates/SRC004_geosparql.csv",

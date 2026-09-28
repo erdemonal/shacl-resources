@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """SRC002 QUDT adapter.
 
-Fixed snapshot: QUDT 3.5.2.
-Existing artifacts.csv rows are inspected and reported without duplication.
+Fixed snapshot: QUDT 3.5.2, discovered from the official QUDT catalog.
+
+Collects versioned SHACL schema/overlay graphs, OWL schema graphs, and
+vocabulary graphs. Aggregate `qudt-all` distributions are noted but not
+recorded as separate artifacts.
 """
 
 from __future__ import annotations
@@ -15,66 +18,142 @@ if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
 from pilot_common import (
-    ARTIFACTS_PATH,
-    RETRIEVED_ON,
     UNKNOWN,
     AdapterResult,
     Candidate,
     existing_artifact_urls,
-    fail,
-    load_csv,
     mark_already_recorded,
+    require_url,
     run_adapter,
 )
 
+CATALOG_URL = "https://www.qudt.org/catalog/qudt-catalog.html"
+VERSION = "3.5.2"
+
+# Official catalog resources for 3.5.2, excluding aggregate qudt-all downloads.
+QUDT_RESOURCES: list[dict[str, str]] = [
+    {
+        "artifact_type": "shacl",
+        "name": "QUDT SHACL Schema",
+        "url": f"http://qudt.org/{VERSION}/schema/shacl/qudt",
+        "intended_target": "QUDT schema",
+    },
+    {
+        "artifact_type": "shacl",
+        "name": "QUDT SHACL Datatype Schema",
+        "url": f"http://qudt.org/{VERSION}/schema/shacl/datatype",
+        "intended_target": "QUDT datatype schema",
+    },
+    {
+        "artifact_type": "shacl",
+        "name": "QUDT SHACL Overlay",
+        "url": f"http://qudt.org/{VERSION}/schema/shacl/overlay/qudt",
+        "intended_target": "QUDT schema",
+    },
+    {
+        "artifact_type": "ontology",
+        "name": "QUDT OWL Schema",
+        "url": f"http://qudt.org/{VERSION}/schema/qudt",
+        "intended_target": "QUDT schema",
+    },
+    {
+        "artifact_type": "ontology",
+        "name": "QUDT OWL Datatype Schema",
+        "url": f"http://qudt.org/{VERSION}/schema/datatype",
+        "intended_target": "QUDT datatype schema",
+    },
+    {
+        "artifact_type": "ontology",
+        "name": "QUDT Vocabulary Constants",
+        "url": f"http://qudt.org/{VERSION}/vocab/constant",
+        "intended_target": "QUDT constants vocabulary",
+    },
+    {
+        "artifact_type": "ontology",
+        "name": "QUDT Vocabulary Datatypes",
+        "url": f"http://qudt.org/{VERSION}/vocab/datatype",
+        "intended_target": "QUDT datatypes vocabulary",
+    },
+    {
+        "artifact_type": "ontology",
+        "name": "QUDT Vocabulary Dimension Vectors",
+        "url": f"http://qudt.org/{VERSION}/vocab/dimensionvector",
+        "intended_target": "QUDT dimension vectors vocabulary",
+    },
+    {
+        "artifact_type": "ontology",
+        "name": "QUDT Vocabulary Prefixes",
+        "url": f"http://qudt.org/{VERSION}/vocab/prefix",
+        "intended_target": "QUDT prefixes vocabulary",
+    },
+    {
+        "artifact_type": "ontology",
+        "name": "QUDT Vocabulary Quantity Kinds",
+        "url": f"http://qudt.org/{VERSION}/vocab/quantitykind",
+        "intended_target": "QUDT quantity kinds vocabulary",
+    },
+    {
+        "artifact_type": "ontology",
+        "name": "QUDT Vocabulary Systems of Quantity Kinds",
+        "url": f"http://qudt.org/{VERSION}/vocab/soqk",
+        "intended_target": "QUDT systems of quantity kinds vocabulary",
+    },
+    {
+        "artifact_type": "ontology",
+        "name": "QUDT Vocabulary Systems of Units",
+        "url": f"http://qudt.org/{VERSION}/vocab/sou",
+        "intended_target": "QUDT systems of units vocabulary",
+    },
+    {
+        "artifact_type": "ontology",
+        "name": "QUDT Vocabulary Units",
+        "url": f"http://qudt.org/{VERSION}/vocab/unit",
+        "intended_target": "QUDT units vocabulary",
+    },
+]
+
 
 def collect() -> AdapterResult:
-    rows = [
-        row for row in load_csv(ARTIFACTS_PATH) if row.get("source_id") == "SRC002"
-    ]
-    if not rows:
-        fail("QUDT adapter expected existing SRC002 rows in artifacts.csv")
+    require_url(CATALOG_URL, "QUDT catalog")
 
     candidates: list[Candidate] = []
-    for row in rows:
-        url = row.get("url", "").strip()
-        if not url:
-            fail(f"QUDT existing artifact {row.get('artifact_id')} has empty url")
+    for resource in QUDT_RESOURCES:
+        url = resource["url"]
+        require_url(url, resource["name"])
         candidates.append(
             Candidate(
                 source_id="SRC002",
-                artifact_type=row.get("artifact_type") or UNKNOWN,
-                name=row.get("name") or UNKNOWN,
-                version=row.get("version") or "3.5.2",
+                artifact_type=resource["artifact_type"],
+                name=resource["name"],
+                version=VERSION,
                 url=url,
-                repository_path=row.get("repository_path", ""),
-                commit_or_release=row.get("commit_or_release") or "3.5.2",
-                retrieved_on=row.get("retrieved_on") or RETRIEVED_ON,
-                format=row.get("format") or UNKNOWN,
-                authoritative_status=row.get("authoritative_status") or UNKNOWN,
-                intended_target=row.get("intended_target") or UNKNOWN,
-                profile_name=row.get("profile_name", ""),
-                generation_method=row.get("generation_method") or UNKNOWN,
-                examples_available=row.get("examples_available") or UNKNOWN,
-                tests_available=row.get("tests_available") or UNKNOWN,
-                license=row.get("license") or UNKNOWN,
-                local_path=row.get("local_path", ""),
-                notes=row.get("notes", ""),
-                source_snapshot="QUDT 3.5.2",
-                evidence_url="https://www.qudt.org/",
-                collection_note=(
-                    f"already recorded in artifacts.csv as {row.get('artifact_id')}"
-                ),
+                commit_or_release=VERSION,
+                format="turtle",
+                authoritative_status="official",
+                intended_target=resource["intended_target"],
+                generation_method=UNKNOWN,
+                examples_available=UNKNOWN,
+                tests_available=UNKNOWN,
+                license=UNKNOWN,
+                notes="Discovered from the official QUDT 3.5.2 catalog.",
+                source_snapshot=f"QUDT {VERSION}",
+                evidence_url=CATALOG_URL,
+                collection_note="catalog-enumerated versioned graph; not from artifacts.csv",
             )
         )
 
-    mark_already_recorded(candidates, existing_artifact_urls())
+    marked = mark_already_recorded(candidates, existing_artifact_urls())
     return AdapterResult(
         source_id="SRC002",
         source_name="QUDT",
         status="processed",
         candidates=candidates,
-        notes=["Fixed snapshot QUDT 3.5.2 already represented in artifacts.csv."],
+        notes=[
+            "Discovery source is the official QUDT catalog, not artifacts.csv.",
+            "Aggregate qudt-all / shacl/qudt-all downloads were not recorded "
+            "because they only package graphs already represented individually.",
+            f"{marked} candidate URL(s) already present in artifacts.csv.",
+        ],
     )
 
 

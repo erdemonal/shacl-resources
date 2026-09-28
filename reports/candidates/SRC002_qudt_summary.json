@@ -2,15 +2,17 @@
   "source_id": "SRC002",
   "source_name": "QUDT",
   "status": "processed",
-  "candidate_rows": 5,
+  "candidate_rows": 13,
   "distinct_shacl_artifacts": 3,
-  "ontology_vocabulary_artifacts": 2,
+  "ontology_vocabulary_artifacts": 10,
   "example_datasets": 0,
   "test_datasets": 0,
   "reports_or_documentation": 0,
   "warnings": [],
   "notes": [
-    "Fixed snapshot QUDT 3.5.2 already represented in artifacts.csv."
+    "Discovery source is the official QUDT catalog, not artifacts.csv.",
+    "Aggregate qudt-all / shacl/qudt-all downloads were not recorded because they only package graphs already represented individually.",
+    "5 candidate URL(s) already present in artifacts.csv."
   ],
   "outputs": {
     "candidates_csv": "reports/candidates/SRC002_qudt.csv",

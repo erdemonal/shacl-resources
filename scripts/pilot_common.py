@@ -106,6 +106,37 @@ def http_get_json(url: str) -> Any:
         fail(f"invalid JSON from {url}: {exc}")
 
 
+def http_url_ok(url: str) -> bool:
+    request = urllib.request.Request(
+        url,
+        method="HEAD",
+        headers={"User-Agent": "shacl-resources-pilot-collector/0.1"},
+    )
+    try:
+        with urllib.request.urlopen(request) as response:
+            return 200 <= response.status < 400
+    except urllib.error.HTTPError as exc:
+        if exc.code in {405, 501}:
+            try:
+                urllib.request.urlopen(
+                    urllib.request.Request(
+                        url,
+                        headers={"User-Agent": "shacl-resources-pilot-collector/0.1"},
+                    )
+                )
+                return True
+            except urllib.error.URLError:
+                return False
+        return False
+    except urllib.error.URLError:
+        return False
+
+
+def require_url(url: str, label: str) -> None:
+    if not http_url_ok(url):
+        fail(f"expected resource unavailable ({label}): {url}")
+
+
 def load_csv(path: Path) -> list[dict[str, str]]:
     with path.open(newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
