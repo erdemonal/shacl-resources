@@ -77,6 +77,26 @@ The `screening_rule` field records how results from a discovery action were scre
 
 For search-result discovery routes, individual screened results are recorded in `data/discovery_results.csv` so that result-level inclusion and exclusion can be audited. `data/discovery_log.csv` remains the action-level summary.
 
+### Repository code-search queries
+
+The initial GitHub code-search pass uses complementary SHACL terms derived from the SHACL vocabulary and shape types:
+
+- `http://www.w3.org/ns/shacl#`
+- `sh:NodeShape`
+- `sh:PropertyShape`
+
+No single query is treated as exhaustive.
+
+The namespace query is intended to detect explicit use of the SHACL vocabulary, while the NodeShape and PropertyShape queries detect the two explicit SHACL shape types.
+
+Because explicit `rdf:type` declarations are not required for every SHACL shape, the repository search is treated as one discovery route among several, not as a complete census of SHACL use.
+
+For each query, the first 50 results in GitHub's returned relevance order are screened and recorded individually.
+
+Results are screened using the same inclusion and exclusion criteria as the rest of the collection.
+
+Repeated hits from the same underlying project do not create independent sources.
+
 The discovery process may be extended if additional useful source types are identified.
 
 ## Metadata
