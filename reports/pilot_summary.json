@@ -1,0 +1,37 @@
+{
+  "sources_considered": [
+    "SRC001",
+    "SRC002",
+    "SRC003",
+    "SRC004",
+    "SRC005",
+    "SRC006"
+  ],
+  "included_sources_processed": [
+    "SRC002",
+    "SRC003",
+    "SRC004",
+    "SRC005",
+    "SRC006"
+  ],
+  "candidate_sources_skipped": [
+    "SRC001"
+  ],
+  "candidate_rows": 31,
+  "distinct_shacl_artifacts": 18,
+  "ontology_vocabulary_artifacts": 2,
+  "example_datasets": 1,
+  "test_datasets": 3,
+  "reports_or_documentation": 7,
+  "duplicates_removed": 0,
+  "already_in_artifacts_csv": 7,
+  "warnings": [
+    "SRC001 SAREF skipped: screened candidate only; ETSI TS 104 267 SHACL Shapes Repository is not yet publicly available.",
+    "OGC adapter inspects only the Main register bblocks array; imported external registers are not recursively collected.",
+    "ODCT skipped out-of-scope file: Demo_Video_ODCT.mp4"
+  ],
+  "outputs": {
+    "candidates_csv": "reports/pilot_artifact_candidates.csv",
+    "summary_json": "reports/pilot_summary.json"
+  }
+}
