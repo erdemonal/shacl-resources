@@ -73,7 +73,7 @@ Count fields are interpreted as follows:
 
 For named-source routes such as advisor seeds or direct follow-ups, `result_count` is left blank because no result list was retrieved. `screened_count` and `included_count` may still record the direct screening outcome.
 
-The `screening_rule` field records how results from a discovery action were screened. For named-source actions this may be a short description such as "named source screened directly". For later search-result routes it may record a cutoff such as "first 50 results in returned relevance order".
+The `screening_rule` field records how results from a discovery action were screened. For named-source actions this may be a short description such as "named source screened directly". For later search-result routes it may record a cutoff such as "first 50 results in platform/tool returned order".
 
 For search-result discovery routes, individual screened results are recorded in `data/discovery_results.csv` so that result-level inclusion and exclusion can be audited. `data/discovery_log.csv` remains the action-level summary.
 
@@ -91,7 +91,7 @@ The namespace query is intended to detect explicit use of the SHACL vocabulary, 
 
 Because explicit `rdf:type` declarations are not required for every SHACL shape, the repository search is treated as one discovery route among several, not as a complete census of SHACL use.
 
-For each query, the first 50 results in GitHub's returned relevance order are screened and recorded individually.
+For each query, the first 50 results in the connector/platform returned order are screened and recorded individually.
 
 Results are screened using the same inclusion and exclusion criteria as the rest of the collection.
 
