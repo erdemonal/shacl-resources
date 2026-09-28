@@ -1,1 +1,6 @@
 artifact_id,source_id,artifact_type,name,version,url,repository_path,commit_or_release,retrieved_on,format,authoritative_status,intended_target,profile_name,generation_method,examples_available,tests_available,license,local_path,notes
+ART001,SRC002,shacl,QUDT SHACL Schema,3.5.2,http://qudt.org/3.5.2/schema/shacl/qudt,,3.5.2,2026-09-28,turtle,official,QUDT schema,,unknown,,,CC BY 4.0,,
+ART002,SRC002,shacl,QUDT SHACL Datatype Schema,3.5.2,http://qudt.org/3.5.2/schema/shacl/datatype,,3.5.2,2026-09-28,turtle,official,QUDT datatype schema,,unknown,,,CC BY 4.0,,
+ART003,SRC002,shacl,QUDT SHACL Overlay,3.5.2,http://qudt.org/3.5.2/schema/shacl/overlay/qudt,,3.5.2,2026-09-28,turtle,official,QUDT schema,,unknown,,,CC BY 4.0,,
+ART004,SRC002,ontology,QUDT OWL Schema,3.5.2,http://qudt.org/3.5.2/schema/qudt,,3.5.2,2026-09-28,turtle,official,QUDT schema,,generated,,,CC BY 4.0,,
+ART005,SRC002,ontology,QUDT OWL Datatype Schema,3.5.2,http://qudt.org/3.5.2/schema/datatype,,3.5.2,2026-09-28,turtle,official,QUDT datatype schema,,unknown,,,CC BY 4.0,,
