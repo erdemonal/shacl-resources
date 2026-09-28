@@ -1,6 +1,6 @@
 search_id,route,platform,query_or_seed,searched_on,result_count,screened_count,included_count,notes
-SEARCH001,advisor_seed,meeting_notes,SAREF,2026-09-28,1,1,0,"Suggested during project discussion; candidate not yet screened."
-SEARCH002,advisor_seed,meeting_notes,QUDT,2026-09-28,1,1,0,"Suggested during project discussion; candidate not yet screened."
-SEARCH003,advisor_seed,meeting_notes,OGC Building Blocks,2026-09-28,1,1,0,"Suggested during project discussion; candidate not yet screened."
-SEARCH004,advisor_seed,meeting_notes,GeoSPARQL,2026-09-28,1,1,0,"Added as a related OGC candidate; not yet screened."
-SEARCH005,advisor_seed,meeting_notes,DCAT-AP,2026-09-28,1,1,0,"Added as a related standards/profile candidate; not yet screened."
+SEARCH001,advisor_seed,meeting_notes,SAREF,2026-09-28,1,0,0,"Suggested during project discussion; candidate not yet screened."
+SEARCH002,advisor_seed,meeting_notes,QUDT,2026-09-28,1,0,0,"Suggested during project discussion; candidate not yet screened."
+SEARCH003,advisor_seed,meeting_notes,OGC Building Blocks,2026-09-28,1,0,0,"Suggested during project discussion; candidate not yet screened."
+SEARCH004,related_source,manual_follow_up,GeoSPARQL,2026-09-28,1,0,0,"Added as a related OGC candidate during follow-up exploration; not yet screened."
+SEARCH005,related_source,manual_follow_up,DCAT-AP,2026-09-28,1,0,0,"Added as a related application profile candidate during follow-up exploration; not yet screened."
