@@ -145,6 +145,13 @@ def is_non_negative_int(value: str) -> bool:
     return int(text) >= 0
 
 
+def is_positive_int(value: str) -> bool:
+    text = value.strip()
+    if not text.isdigit():
+        return False
+    return int(text) >= 1
+
+
 def load_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     with path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
@@ -299,6 +306,7 @@ def validate_discovery_results(
     path: Path,
     rows: list[dict[str, str]],
     source_ids: set[str],
+    discovery_ids: set[str],
     errors: list[str],
 ) -> None:
     seen_pairs: dict[tuple[str, str], int] = {}
@@ -309,21 +317,26 @@ def validate_discovery_results(
         decision = (row.get("screening_decision") or "").strip()
         source_id = (row.get("source_id") or "").strip()
         exclusion_reason = (row.get("exclusion_reason") or "").strip()
+        url = (row.get("url") or "").strip()
         row_label = discovery_id or f"row {index}"
 
         if is_blank(discovery_id):
             errors.append(
                 f"{path}:{index}: missing required field 'discovery_id'"
             )
+        elif discovery_id not in discovery_ids:
+            errors.append(
+                f"{path}:{index}: {row_label}: unknown discovery_id {discovery_id!r}"
+            )
 
         if is_blank(result_rank):
             errors.append(
                 f"{path}:{index}: {row_label}: missing required field 'result_rank'"
             )
-        elif not is_non_negative_int(result_rank):
+        elif not is_positive_int(result_rank):
             errors.append(
-                f"{path}:{index}: {row_label}: 'result_rank' must be a non-negative "
-                f"integer; got {result_rank!r}"
+                f"{path}:{index}: {row_label}: 'result_rank' must be a positive "
+                f"integer starting from 1; got {result_rank!r}"
             )
         else:
             pair = (discovery_id, result_rank)
@@ -357,6 +370,11 @@ def validate_discovery_results(
             errors.append(
                 f"{path}:{index}: {row_label}: excluded results must have an "
                 "exclusion_reason"
+            )
+
+        if not is_blank(url) and not is_valid_url(url):
+            errors.append(
+                f"{path}:{index}: {row_label}: invalid URL in 'url': {url!r}"
             )
 
 
@@ -413,8 +431,13 @@ def validate_manifest() -> int:
 
     validate_screening_decisions(SOURCES_PATH, source_rows, errors)
     validate_discovery_log(DISCOVERY_LOG_PATH, discovery_rows, errors)
+    discovery_ids = {
+        (row.get("discovery_id") or "").strip()
+        for row in discovery_rows
+        if (row.get("discovery_id") or "").strip()
+    }
     validate_discovery_results(
-        DISCOVERY_RESULTS_PATH, result_rows, source_ids, errors
+        DISCOVERY_RESULTS_PATH, result_rows, source_ids, discovery_ids, errors
     )
 
     validate_enum(
