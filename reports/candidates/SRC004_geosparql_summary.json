@@ -1,0 +1,19 @@
+{
+  "source_id": "SRC004",
+  "source_name": "GeoSPARQL",
+  "status": "processed",
+  "candidate_rows": 3,
+  "distinct_shacl_artifacts": 2,
+  "ontology_vocabulary_artifacts": 0,
+  "example_datasets": 0,
+  "test_datasets": 0,
+  "reports_or_documentation": 1,
+  "warnings": [],
+  "notes": [
+    "Official core validator and community extended shapes are kept separate."
+  ],
+  "outputs": {
+    "candidates_csv": "reports/candidates/SRC004_geosparql.csv",
+    "summary_json": "reports/candidates/SRC004_geosparql_summary.json"
+  }
+}

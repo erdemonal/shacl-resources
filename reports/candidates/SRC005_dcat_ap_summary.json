@@ -1,0 +1,19 @@
+{
+  "source_id": "SRC005",
+  "source_name": "DCAT-AP",
+  "status": "processed",
+  "candidate_rows": 10,
+  "distinct_shacl_artifacts": 9,
+  "ontology_vocabulary_artifacts": 0,
+  "example_datasets": 0,
+  "test_datasets": 0,
+  "reports_or_documentation": 1,
+  "warnings": [],
+  "notes": [
+    "Historical DCAT-AP releases are outside this pilot snapshot."
+  ],
+  "outputs": {
+    "candidates_csv": "reports/candidates/SRC005_dcat_ap.csv",
+    "summary_json": "reports/candidates/SRC005_dcat_ap_summary.json"
+  }
+}

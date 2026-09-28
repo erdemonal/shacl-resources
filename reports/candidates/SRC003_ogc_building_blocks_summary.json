@@ -1,0 +1,21 @@
+{
+  "source_id": "SRC003",
+  "source_name": "OGC Building Blocks",
+  "status": "processed",
+  "candidate_rows": 2,
+  "distinct_shacl_artifacts": 2,
+  "ontology_vocabulary_artifacts": 0,
+  "example_datasets": 0,
+  "test_datasets": 0,
+  "reports_or_documentation": 0,
+  "warnings": [
+    "OGC adapter inspects only the Main register bblocks array; imported external registers are not recursively collected."
+  ],
+  "notes": [
+    "Artifact unit is the distinct SHACL file URL, not the building block."
+  ],
+  "outputs": {
+    "candidates_csv": "reports/candidates/SRC003_ogc_building_blocks.csv",
+    "summary_json": "reports/candidates/SRC003_ogc_building_blocks_summary.json"
+  }
+}

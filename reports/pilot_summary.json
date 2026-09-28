@@ -18,11 +18,11 @@
     "SRC001"
   ],
   "candidate_rows": 31,
-  "distinct_shacl_artifacts": 18,
+  "distinct_shacl_artifacts": 17,
   "ontology_vocabulary_artifacts": 2,
   "example_datasets": 1,
   "test_datasets": 3,
-  "reports_or_documentation": 7,
+  "reports_or_documentation": 8,
   "duplicates_removed": 0,
   "already_in_artifacts_csv": 7,
   "warnings": [
@@ -30,8 +30,47 @@
     "OGC adapter inspects only the Main register bblocks array; imported external registers are not recursively collected.",
     "ODCT skipped out-of-scope file: Demo_Video_ODCT.mp4"
   ],
+  "per_source_outputs": [
+    {
+      "source_id": "SRC001",
+      "source_name": "SAREF",
+      "status": "skipped",
+      "candidate_rows": 0
+    },
+    {
+      "source_id": "SRC002",
+      "source_name": "QUDT",
+      "status": "processed",
+      "candidate_rows": 5
+    },
+    {
+      "source_id": "SRC003",
+      "source_name": "OGC Building Blocks",
+      "status": "processed",
+      "candidate_rows": 2
+    },
+    {
+      "source_id": "SRC004",
+      "source_name": "GeoSPARQL",
+      "status": "processed",
+      "candidate_rows": 3
+    },
+    {
+      "source_id": "SRC005",
+      "source_name": "DCAT-AP",
+      "status": "processed",
+      "candidate_rows": 10
+    },
+    {
+      "source_id": "SRC006",
+      "source_name": "ODCT",
+      "status": "processed",
+      "candidate_rows": 11
+    }
+  ],
   "outputs": {
     "candidates_csv": "reports/pilot_artifact_candidates.csv",
-    "summary_json": "reports/pilot_summary.json"
+    "summary_json": "reports/pilot_summary.json",
+    "per_source_dir": "reports/candidates/"
   }
 }

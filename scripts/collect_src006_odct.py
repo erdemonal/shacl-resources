@@ -41,12 +41,12 @@ ODCT_REQUIRED_FILES = {
 
 def classify_odct_file(filename: str) -> tuple[str, str]:
     lower = filename.lower()
-    if lower.endswith("_shacl_shape.ttl") or "shacl" in lower:
-        return "shacl", "turtle"
-    if "report" in lower and lower.endswith(".pdf"):
-        return "documentation", "pdf"
     if lower.endswith(".md"):
         return "documentation", "markdown"
+    if "report" in lower and lower.endswith(".pdf"):
+        return "documentation", "pdf"
+    if lower.endswith("_shacl_shape.ttl") or lower.endswith(".ttl"):
+        return "shacl", "turtle"
     if "modifieddataset" in lower:
         return "test_data", "json"
     if "compliant_dataset" in lower:
