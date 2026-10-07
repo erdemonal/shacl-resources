@@ -1,0 +1,551 @@
+{
+  "milestone": 2,
+  "mode": "pilot",
+  "collected_at": "2026-10-07T19:15:48Z",
+  "repository_count": 50,
+  "status_counts": {
+    "not_verified": 13,
+    "verified_shacl": 28,
+    "incomplete_inspection": 6,
+    "no_shacl_found": 3
+  },
+  "inspection_complete_true": 20,
+  "limits": {
+    "max_file_bytes": 20971520,
+    "max_candidate_files": 400,
+    "max_archive_bytes": 209715200
+  },
+  "verification_config_sha256": "46200e97cd870b419933a9de76cbd0a2e6e795b579945d31d16af1a0771ebe0f",
+  "vocabulary": {
+    "source_url": "https://www.w3.org/ns/shacl.ttl",
+    "path": "/home/erdem/Documents/GitHub/shacl-resources/src/shacl_study/data/w3c-shacl.ttl",
+    "sha256": "0e5d8aea0eab98a072d4a02faaee1ee914ec99eab2ca473429726faed4a13f69",
+    "core_constraint_parameters": [
+      "and",
+      "class",
+      "closed",
+      "datatype",
+      "disjoint",
+      "equals",
+      "flags",
+      "hasValue",
+      "ignoredProperties",
+      "in",
+      "languageIn",
+      "lessThan",
+      "lessThanOrEquals",
+      "maxCount",
+      "maxExclusive",
+      "maxInclusive",
+      "maxLength",
+      "minCount",
+      "minExclusive",
+      "minInclusive",
+      "minLength",
+      "node",
+      "nodeKind",
+      "not",
+      "or",
+      "pattern",
+      "property",
+      "qualifiedMaxCount",
+      "qualifiedMinCount",
+      "qualifiedValueShape",
+      "qualifiedValueShapesDisjoint",
+      "uniqueLang",
+      "xone"
+    ],
+    "core_target_predicates": [
+      "target",
+      "targetClass",
+      "targetNode",
+      "targetObjectsOf",
+      "targetSubjectsOf"
+    ],
+    "core_path_predicates": [
+      "path"
+    ],
+    "sparql_evidence_predicates": [
+      "ask",
+      "construct",
+      "select",
+      "sparql",
+      "update"
+    ],
+    "excluded_components": [
+      "ExpressionConstraintComponent",
+      "JSConstraintComponent",
+      "SPARQLConstraintComponent"
+    ],
+    "derivation": "Core constraint parameters are sh:path values of sh:Parameter nodes on sh:ConstraintComponent instances whose rdfs:label does not identify a SPARQL, JavaScript, or expression component. Core targets are rdf:Property values with rdfs:domain sh:Shape whose local name starts with 'target'. sh:path is included when the vocabulary gives it rdfs:domain sh:PropertyShape. SHACL-SPARQL evidence predicates are sh:sparql plus properties whose rdfs:domain is a SPARQL ASK, SELECT, CONSTRUCT, or UPDATE executable. sh:sparql, sh:select, and sh:ask are not SHACL Core constraints."
+  },
+  "rule": {
+    "verified_shacl": "At least one parsed RDF graph contains rdf:type sh:NodeShape, rdf:type sh:PropertyShape, a derived SHACL Core target or constraint-parameter predicate, sh:path as declared for property shapes, or a derived SHACL-SPARQL evidence predicate (sh:sparql, sh:select, sh:ask, sh:construct, sh:update). A SHACL namespace IRI alone does not verify.",
+    "prefilter": "Repositories with no code-search signal are parsed only when a candidate file's bytes contain the SHACL namespace IRI or a derived shape predicate. A prefilter miss is not_verified/prefilter_no_shacl_signal with inspection_complete false.",
+    "no_shacl_found": "Every accepted candidate file was parsed, none contained a SHACL-namespace IRI, and no operational limit was hit."
+  },
+  "api": {
+    "core_requests_per_repository": 2,
+    "network_requests_observed": {
+      "core": 100,
+      "code": 0,
+      "repository": 0,
+      "raw": 5124,
+      "codeload": 0
+    },
+    "full_corpus_core_requests_at_15075": 30150,
+    "full_corpus_core_hours_at_5000_per_hour": 6.03
+  },
+  "pilot_repositories": [
+    {
+      "repository_id": "1197206",
+      "repository_full_name": "TortoiseGit/TortoiseGit",
+      "pilot_stratum": "targeted_code",
+      "verification_status": "not_verified",
+      "verification_reason": "no_candidate_rdf_files",
+      "inspection_complete": false,
+      "commit_sha_examined": "7338078f8ddd924b8cddee35f512f2286072136d"
+    },
+    {
+      "repository_id": "132451334",
+      "repository_full_name": "weso/shexer",
+      "pilot_stratum": "targeted_code",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_shape_evidence",
+      "inspection_complete": false,
+      "commit_sha_examined": "bfa82aebe8479eb42f5dfba054f221c72e7c21d3"
+    },
+    {
+      "repository_id": "283326779",
+      "repository_full_name": "cancerDHC/csv2caDSR",
+      "pilot_stratum": "targeted_code",
+      "verification_status": "incomplete_inspection",
+      "verification_reason": "candidate_file_cap",
+      "inspection_complete": false,
+      "commit_sha_examined": "1cc7dca72bedbed0b412e0c8ab17aecb6c391453"
+    },
+    {
+      "repository_id": "457686615",
+      "repository_full_name": "OP-TED/ted-rdf-mapping",
+      "pilot_stratum": "targeted_code",
+      "verification_status": "incomplete_inspection",
+      "verification_reason": "candidate_file_cap",
+      "inspection_complete": false,
+      "commit_sha_examined": "2004fef480fe38706a5f15dc8db89806d005077d"
+    },
+    {
+      "repository_id": "615214940",
+      "repository_full_name": "Informasjonsforvaltning/fdk-mqa-dcat-validator",
+      "pilot_stratum": "targeted_code",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_shape_evidence",
+      "inspection_complete": false,
+      "commit_sha_examined": "11a7ac6e4ec0d7c721bf3bdfa309afb05cca8645"
+    },
+    {
+      "repository_id": "784023525",
+      "repository_full_name": "icsm-au/3d-csdm-profile-icsm",
+      "pilot_stratum": "targeted_code",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_and_sparql_shape_evidence",
+      "inspection_complete": true,
+      "commit_sha_examined": "f85d5245f6cb589fde469ee8ccdede9e75bd1f8b"
+    },
+    {
+      "repository_id": "938809221",
+      "repository_full_name": "sebastians1999/federated-sparql-rag-agent",
+      "pilot_stratum": "targeted_code",
+      "verification_status": "incomplete_inspection",
+      "verification_reason": "candidate_file_cap",
+      "inspection_complete": false,
+      "commit_sha_examined": "a064b7529e66a7f30504ce243d96961d52603900"
+    },
+    {
+      "repository_id": "1102965953",
+      "repository_full_name": "DJ1TJOO/shacl-form-editor",
+      "pilot_stratum": "targeted_code",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_and_sparql_shape_evidence",
+      "inspection_complete": false,
+      "commit_sha_examined": "1886a44d498419927567989d9898701b9e1f3762"
+    },
+    {
+      "repository_id": "1233703662",
+      "repository_full_name": "mhodki/pump",
+      "pilot_stratum": "targeted_code",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_shape_evidence",
+      "inspection_complete": true,
+      "commit_sha_examined": "2179f1366fb817dc1b78b4ab60f6b121cb8261fe"
+    },
+    {
+      "repository_id": "1408697978",
+      "repository_full_name": "blw-ofag-ufag/system-map-backend",
+      "pilot_stratum": "targeted_code",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_and_sparql_shape_evidence",
+      "inspection_complete": true,
+      "commit_sha_examined": "fdb68fbdab3db5da7ca57fbaae270b80d6c42364"
+    },
+    {
+      "repository_id": "21280081",
+      "repository_full_name": "CenterForOpenScience/SHARE",
+      "pilot_stratum": "code_broad_only",
+      "verification_status": "no_shacl_found",
+      "verification_reason": "parsed_candidate_files_without_shacl_terms",
+      "inspection_complete": true,
+      "commit_sha_examined": "53de80c1a4831009db052b0517b90584e548f1d3"
+    },
+    {
+      "repository_id": "187541165",
+      "repository_full_name": "drupal-tome/big-tome",
+      "pilot_stratum": "code_broad_only",
+      "verification_status": "incomplete_inspection",
+      "verification_reason": "candidate_file_cap",
+      "inspection_complete": false,
+      "commit_sha_examined": "bc353669b13f5c52d1f8e0dfa2b437a0aa76f7ac"
+    },
+    {
+      "repository_id": "352829860",
+      "repository_full_name": "jspaezp/elfragmentador-data",
+      "pilot_stratum": "code_broad_only",
+      "verification_status": "not_verified",
+      "verification_reason": "no_candidate_rdf_files",
+      "inspection_complete": false,
+      "commit_sha_examined": "f3530d3267ffa51757e83a94cdbc5c5c8d6c6a29"
+    },
+    {
+      "repository_id": "639301105",
+      "repository_full_name": "LevisKibet/Kodisha-final",
+      "pilot_stratum": "code_broad_only",
+      "verification_status": "not_verified",
+      "verification_reason": "no_candidate_rdf_files",
+      "inspection_complete": false,
+      "commit_sha_examined": "a14228d0d207304db2ac8d5070fde55171effe9a"
+    },
+    {
+      "repository_id": "860406998",
+      "repository_full_name": "danja/tia",
+      "pilot_stratum": "code_broad_only",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_and_sparql_shape_evidence",
+      "inspection_complete": true,
+      "commit_sha_examined": "f21dce3f38c6f906268ff55013fd724307f157c6"
+    },
+    {
+      "repository_id": "1118234260",
+      "repository_full_name": "SOLVE-IT-DF/solve-it-ontology",
+      "pilot_stratum": "code_broad_only",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_and_sparql_shape_evidence",
+      "inspection_complete": true,
+      "commit_sha_examined": "0f47a01460ab2dc86ea2da8112a62cd48e64b068"
+    },
+    {
+      "repository_id": "1234948080",
+      "repository_full_name": "Shubham-Kanse/retune",
+      "pilot_stratum": "code_broad_only",
+      "verification_status": "no_shacl_found",
+      "verification_reason": "parsed_candidate_files_without_shacl_terms",
+      "inspection_complete": true,
+      "commit_sha_examined": "a726111c413c3b72e5ab4a430af6bf330b0d189a"
+    },
+    {
+      "repository_id": "1380946204",
+      "repository_full_name": "sophia-labs/gardend",
+      "pilot_stratum": "code_broad_only",
+      "verification_status": "no_shacl_found",
+      "verification_reason": "parsed_candidate_files_without_shacl_terms",
+      "inspection_complete": true,
+      "commit_sha_examined": "de868d834b038bd93994c0475b7654ba5324d17d"
+    },
+    {
+      "repository_id": "1872017",
+      "repository_full_name": "cygri/rdf-logos",
+      "pilot_stratum": "topic_only",
+      "verification_status": "not_verified",
+      "verification_reason": "no_candidate_rdf_files",
+      "inspection_complete": false,
+      "commit_sha_examined": "75c77cfabba080791b699587dd9f1a8b43683745"
+    },
+    {
+      "repository_id": "309326626",
+      "repository_full_name": "MBoegers/shacl-validate-cim",
+      "pilot_stratum": "topic_only",
+      "verification_status": "not_verified",
+      "verification_reason": "prefilter_no_shacl_signal",
+      "inspection_complete": false,
+      "commit_sha_examined": "178c47ddff7a893606f8441ff95ffe3c15ead6e3"
+    },
+    {
+      "repository_id": "676473489",
+      "repository_full_name": "Daham-Mustaf/SHACL-to-Validate-RDF-Jena-apache-Data",
+      "pilot_stratum": "topic_only",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_shape_evidence",
+      "inspection_complete": true,
+      "commit_sha_examined": "3ef8fcc0bfcd328e79623333981c0571a7581b59"
+    },
+    {
+      "repository_id": "949847839",
+      "repository_full_name": "SDM-TIB/VANILLA",
+      "pilot_stratum": "topic_only",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_and_sparql_shape_evidence",
+      "inspection_complete": false,
+      "commit_sha_examined": "c7d9046dd8e4244be3dad981ed12a8174c9fe12f"
+    },
+    {
+      "repository_id": "1170225250",
+      "repository_full_name": "tggo/goRDFlib",
+      "pilot_stratum": "topic_only",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_and_sparql_shape_evidence",
+      "inspection_complete": true,
+      "commit_sha_examined": "693073baa25133eb0d919208a8ca24688e50da89"
+    },
+    {
+      "repository_id": "1264773578",
+      "repository_full_name": "skunkworks-powerweave/ontology-app-substrate",
+      "pilot_stratum": "topic_only",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_shape_evidence",
+      "inspection_complete": true,
+      "commit_sha_examined": "769f060a3f9494ebd95b184860019f7c69e4c82e"
+    },
+    {
+      "repository_id": "1329443517",
+      "repository_full_name": "Destivano/NORMA",
+      "pilot_stratum": "topic_only",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_and_sparql_shape_evidence",
+      "inspection_complete": true,
+      "commit_sha_examined": "f10ab53e02b2a98493d2d7de569edcbbf3320637"
+    },
+    {
+      "repository_id": "1404007966",
+      "repository_full_name": "rudof-project/web-demo",
+      "pilot_stratum": "topic_only",
+      "verification_status": "not_verified",
+      "verification_reason": "prefilter_no_shacl_signal",
+      "inspection_complete": false,
+      "commit_sha_examined": "746b7e8fe6facd757b063c3f190549b29de4a859"
+    },
+    {
+      "repository_id": "580180",
+      "repository_full_name": "ChrisLundquist/SHACL",
+      "pilot_stratum": "broad_repository_only",
+      "verification_status": "not_verified",
+      "verification_reason": "no_candidate_rdf_files",
+      "inspection_complete": false,
+      "commit_sha_examined": "2f727018166f8b315c90b114f2e1bec50130d537"
+    },
+    {
+      "repository_id": "559598694",
+      "repository_full_name": "pintonos/KGCBF",
+      "pilot_stratum": "broad_repository_only",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_and_sparql_shape_evidence",
+      "inspection_complete": true,
+      "commit_sha_examined": "c4953e2d7397f162145ba6a4b931b8ae4d836e12"
+    },
+    {
+      "repository_id": "942657739",
+      "repository_full_name": "WSE-research/LLM-context-vs-training-experiment",
+      "pilot_stratum": "broad_repository_only",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_and_sparql_shape_evidence",
+      "inspection_complete": true,
+      "commit_sha_examined": "0680409c410777f2d2d1bd96e21930cab9616871"
+    },
+    {
+      "repository_id": "1127214035",
+      "repository_full_name": "Cnext-eu/kairos-ontology-toolkit",
+      "pilot_stratum": "broad_repository_only",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_and_sparql_shape_evidence",
+      "inspection_complete": true,
+      "commit_sha_examined": "36d352c0b0a38e8e8765f52f678227cc6aeca130"
+    },
+    {
+      "repository_id": "1221077121",
+      "repository_full_name": "faubulous/mentor-rdf-reasoners",
+      "pilot_stratum": "broad_repository_only",
+      "verification_status": "not_verified",
+      "verification_reason": "no_candidate_rdf_files",
+      "inspection_complete": false,
+      "commit_sha_examined": "a8ee165c48e34cef38dd663698e90984f6af8d0e"
+    },
+    {
+      "repository_id": "1283403140",
+      "repository_full_name": "CarbonSigProductHub/comet-carbonsig",
+      "pilot_stratum": "broad_repository_only",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_and_sparql_shape_evidence",
+      "inspection_complete": false,
+      "commit_sha_examined": "5e5b8ba99434ef305c1367b0353e0d48ada5f22c"
+    },
+    {
+      "repository_id": "1339643803",
+      "repository_full_name": "aisemanticexpert/ontology-governance",
+      "pilot_stratum": "broad_repository_only",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_shape_evidence",
+      "inspection_complete": true,
+      "commit_sha_examined": "f931304f92ce0f498972c2ffd0952c5ef5d3cd6f"
+    },
+    {
+      "repository_id": "1408912228",
+      "repository_full_name": "inuits/elody-generator",
+      "pilot_stratum": "broad_repository_only",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_and_sparql_shape_evidence",
+      "inspection_complete": false,
+      "commit_sha_examined": "0d56792ff0c7048e3e75e51ad7780bfbeb79caf5"
+    },
+    {
+      "repository_id": "468741",
+      "repository_full_name": "jcvanderwal/apache.ofbiz",
+      "pilot_stratum": "fork",
+      "verification_status": "incomplete_inspection",
+      "verification_reason": "candidate_file_cap",
+      "inspection_complete": false,
+      "commit_sha_examined": "a333c8bc9e98005699d66a8f62d28c2bbf375b9e"
+    },
+    {
+      "repository_id": "356760668",
+      "repository_full_name": "RedCrusaderJr/rdf4j",
+      "pilot_stratum": "fork",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_and_sparql_shape_evidence",
+      "inspection_complete": false,
+      "commit_sha_examined": "7cb2554e2004648eee0d17011c3eba8e6a8dd3e0"
+    },
+    {
+      "repository_id": "650625777",
+      "repository_full_name": "Jeri-jose/neosemantics",
+      "pilot_stratum": "fork",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_shape_evidence",
+      "inspection_complete": false,
+      "commit_sha_examined": "44e0bf3af6ce5fcf2a9faf513227429e27ec568a"
+    },
+    {
+      "repository_id": "966720413",
+      "repository_full_name": "Luke-ebbis/Sparnatural",
+      "pilot_stratum": "fork",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_and_sparql_shape_evidence",
+      "inspection_complete": true,
+      "commit_sha_examined": "45c4c444f919ad54b57e5370d099c4d3d70e9a26"
+    },
+    {
+      "repository_id": "1206303243",
+      "repository_full_name": "codeaudit/foundry-ontology-open",
+      "pilot_stratum": "fork",
+      "verification_status": "not_verified",
+      "verification_reason": "prefilter_no_shacl_signal",
+      "inspection_complete": false,
+      "commit_sha_examined": "1992b3081104f1bb4826e69d77a4da6bcabb4797"
+    },
+    {
+      "repository_id": "1318855989",
+      "repository_full_name": "Data-CPA/owl-portability-layer",
+      "pilot_stratum": "fork",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_and_sparql_shape_evidence",
+      "inspection_complete": true,
+      "commit_sha_examined": "0dc0d14b2dee5fb24eb0e754bb851c6efb04e31e"
+    },
+    {
+      "repository_id": "1343259167",
+      "repository_full_name": "umairbari/semantica",
+      "pilot_stratum": "fork",
+      "verification_status": "not_verified",
+      "verification_reason": "prefilter_no_shacl_signal",
+      "inspection_complete": false,
+      "commit_sha_examined": "44c0c7a76d6649956e2919b43859fcbaaa11a7b1"
+    },
+    {
+      "repository_id": "1408902658",
+      "repository_full_name": "daanjo3/lde",
+      "pilot_stratum": "fork",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_shape_evidence",
+      "inspection_complete": true,
+      "commit_sha_examined": "93f5a8755880e559411e8b8548a9b1d62afc8f87"
+    },
+    {
+      "repository_id": "36371940",
+      "repository_full_name": "Wimmics/corese",
+      "pilot_stratum": "archived",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_shape_evidence",
+      "inspection_complete": false,
+      "commit_sha_examined": "3b1236781828291397fc740bb2d20209c434dfb1"
+    },
+    {
+      "repository_id": "168527326",
+      "repository_full_name": "Fedict/lod-vocab-data",
+      "pilot_stratum": "archived",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_shape_evidence",
+      "inspection_complete": false,
+      "commit_sha_examined": "344031034baa42f27d023c228452578a5d0cfb3c"
+    },
+    {
+      "repository_id": "310521006",
+      "repository_full_name": "NatLabRockies/tasty",
+      "pilot_stratum": "archived",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_shape_evidence",
+      "inspection_complete": false,
+      "commit_sha_examined": "4c33a792e4163bc29838744c575a4b10c71cc1ca"
+    },
+    {
+      "repository_id": "461978502",
+      "repository_full_name": "zerocmd/UCO",
+      "pilot_stratum": "archived",
+      "verification_status": "verified_shacl",
+      "verification_reason": "core_shape_evidence",
+      "inspection_complete": true,
+      "commit_sha_examined": "c83bbcaf7841d5b7c1f8183a12d0afaf3806f699"
+    },
+    {
+      "repository_id": "730185606",
+      "repository_full_name": "Kurrawong/rdframe-lib",
+      "pilot_stratum": "archived",
+      "verification_status": "not_verified",
+      "verification_reason": "no_candidate_rdf_files",
+      "inspection_complete": false,
+      "commit_sha_examined": "0e6c714b26f6c426bef40d134172a75283b1ce2b"
+    },
+    {
+      "repository_id": "939866670",
+      "repository_full_name": "sesam-io/rdflib",
+      "pilot_stratum": "archived",
+      "verification_status": "incomplete_inspection",
+      "verification_reason": "candidate_file_cap",
+      "inspection_complete": false,
+      "commit_sha_examined": "cfd422236cd03933290757a8cacb214a40866bea"
+    },
+    {
+      "repository_id": "1219630508",
+      "repository_full_name": "TACITUS-me/semantica4tacitus",
+      "pilot_stratum": "archived",
+      "verification_status": "not_verified",
+      "verification_reason": "prefilter_no_shacl_signal",
+      "inspection_complete": false,
+      "commit_sha_examined": "c0d08c46f75ac107979927aa5bffbc4a82b351cd"
+    },
+    {
+      "repository_id": "1383158317",
+      "repository_full_name": "johnaffolter-quantlink/ontology-atlas",
+      "pilot_stratum": "archived",
+      "verification_status": "not_verified",
+      "verification_reason": "no_candidate_rdf_files",
+      "inspection_complete": false,
+      "commit_sha_examined": "98f55f8d21721ce18f39291371e3bc2bd43a3eda"
+    }
+  ]
+}

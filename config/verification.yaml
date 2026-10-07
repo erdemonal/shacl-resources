@@ -1,0 +1,23 @@
+# Engineering limits for Milestone 2 content inspection.
+# These bounds are operational. Crossing one does not classify a repository
+# as semantically ambiguous.
+
+max_file_bytes: 20971520
+max_candidate_files: 400
+max_archive_bytes: 209715200
+
+strong_extensions:
+  - .ttl
+  - .trig
+  - .n3
+  - .nt
+  - .nq
+  - .rdf
+  - .owl
+  - .jsonld
+  - .json-ld
+  - .shacl
+
+sniff_extensions:
+  .xml: rdfxml
+  .json: jsonld

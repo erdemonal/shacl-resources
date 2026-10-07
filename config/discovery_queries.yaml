@@ -1,0 +1,103 @@
+# Milestone 1 discovery queries.
+# Each entry is expanded into separate GitHub search executions.
+# Code search and repository search are not treated as the same signal.
+#
+# Code queries are sent to GET /search/code, which GitHub documents as legacy
+# code search. Extension slices are a deliberate RDF-oriented partition.
+# They are not a claim that every SHACL file has one of these extensions.
+#
+# Repository queries are sent to GET /search/repositories.
+# A created: date range is added only when a repository query reports at least
+# 1000 hits. Queries under that ceiling are sent without a date filter.
+
+code_search:
+  # The live pilot showed that legacy code search treats fork:true like fork:only.
+  # Do not send fork:true here. The primary stream omits the fork qualifier.
+  # fork:only is a separate execution so fork hits keep their own provenance.
+  content_qualifier: "in:file"
+  fork_streams:
+    - id: primary
+      qualifier: ""
+    - id: fork_only
+      qualifier: "fork:only"
+  extensions:
+    - ttl
+    - trig
+    - nt
+    - rdf
+    - xml
+    - owl
+    - jsonld
+    - nq
+  queries:
+    - id: canonical_namespace
+      family: canonical_namespace
+      term: '"http://www.w3.org/ns/shacl#"'
+      partition_by_extension: true
+    - id: class_node_shape
+      family: shacl_class_name
+      term: '"sh:NodeShape"'
+      partition_by_extension: true
+    - id: class_property_shape
+      family: shacl_class_name
+      term: '"sh:PropertyShape"'
+      partition_by_extension: true
+    - id: term_target_class
+      family: shacl_term
+      term: '"sh:targetClass"'
+      partition_by_extension: true
+    - id: term_path
+      family: shacl_term
+      term: '"sh:path"'
+      partition_by_extension: true
+    - id: term_min_count
+      family: shacl_term
+      term: '"sh:minCount"'
+      partition_by_extension: true
+    - id: term_max_count
+      family: shacl_term
+      term: '"sh:maxCount"'
+      partition_by_extension: true
+    - id: term_class
+      family: shacl_term
+      term: '"sh:class"'
+      partition_by_extension: true
+    - id: term_datatype
+      family: shacl_term
+      term: '"sh:datatype"'
+      partition_by_extension: true
+    - id: term_or
+      family: shacl_term
+      term: '"sh:or"'
+      partition_by_extension: true
+    - id: term_and
+      family: shacl_term
+      term: '"sh:and"'
+      partition_by_extension: true
+    - id: iri_node_shape
+      family: shacl_full_iri
+      term: '"http://www.w3.org/ns/shacl#NodeShape"'
+      partition_by_extension: true
+    - id: iri_property_shape
+      family: shacl_full_iri
+      term: '"http://www.w3.org/ns/shacl#PropertyShape"'
+      partition_by_extension: true
+    - id: broad_shacl
+      family: broad_text
+      term: "SHACL"
+      partition_by_extension: false
+
+repository_search:
+  public_qualifier: "is:public"
+  fork_qualifier: "fork:true"
+  # Used only after a repository query hits the 1000-result ceiling.
+  date_partition_start: "2007-01-01"
+  queries:
+    - id: topic_shacl
+      family: repository_topic
+      term: "topic:shacl"
+      date_partition: true
+    - id: broad_shacl
+      family: broad_text
+      term: "SHACL in:name,description,readme,topics"
+      date_partition: true
