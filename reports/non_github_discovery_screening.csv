@@ -1,6 +1,0 @@
-discovery_id,feedback_item,evidence,outcome,reason
-DISCOVERY010,related working groups,W3C Data Shapes WG; w3c/shacl-resources@eaffc1aa8958d21dac4c6bb514014e1a2ac23b02,included source SRC040,official SHACL resource collection with identifiable purpose and fixed snapshot
-DISCOVERY011,LinkML,Official LinkML SHACL generator documentation,no source added,generator/tool; downstream published SHACL resources must be screened independently
-DISCOVERY012,SHACL surveys,"Pareti and Konstantinidis, A Review of SHACL",literature seed only,review paper informs literature/discovery but is not itself a SHACL resource source
-DISCOVERY013,SHACL surveys,Rabbani et al. 2022 project; Zenodo DOI 10.5281/zenodo.5958986,included source SRC042,public generated SHACL shapes with identifiable dataset targets and traceable research purpose
-DISCOVERY014,Profiles Vocabulary,W3C dx-prof@b17d619fb7a2b71f0701142c0d25b86e2c6c1d6b; prof/rdf/validator.ttl,included source SRC041,official profile specification with a concrete SHACL validator and directly relevant profile-resource semantics
