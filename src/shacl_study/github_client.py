@@ -69,6 +69,7 @@ class GitHubClient:
             "raw": 0,
             "codeload": 0,
         }
+        self.network_bytes: dict[str, int] = {"raw": 0, "codeload": 0}
 
     def search(self, endpoint: str, query: str, *, page: int, per_page: int) -> SearchPage:
         if endpoint not in SEARCH_PATHS:
@@ -106,6 +107,19 @@ class GitHubClient:
 
     def get_raw_file(self, full_name: str, commit_sha: str, path: str) -> bytes:
         return self._request_bytes(raw_content_url(full_name, commit_sha, path), slot="raw")
+
+    def peek_raw_file(self, full_name: str, commit_sha: str, path: str, *, max_bytes: int = 65536) -> tuple[bytes, bool]:
+        """Return a prefix and whether it is the complete file.
+
+        Generic XML and JSON are sniffed from this prefix. A miss does not download the rest.
+        """
+        url = raw_content_url(full_name, commit_sha, path)
+        cached = self._read_byte_cache(url)
+        if cached is not None:
+            if len(cached) <= max_bytes:
+                return cached, True
+            return cached[:max_bytes], False
+        return self._request_prefix(url, max_bytes=max_bytes, slot="raw")
 
     def download_tarball(self, full_name: str, commit_sha: str, *, max_bytes: int) -> Path:
         url = tarball_url(full_name, commit_sha)
@@ -150,6 +164,7 @@ class GitHubClient:
                     raise
                 partial.replace(cache)
                 response.close()
+                self.network_bytes["codeload"] = self.network_bytes.get("codeload", 0) + total
                 return cache
             response.close()
             if response.status_code == 401:
@@ -277,6 +292,7 @@ class GitHubClient:
             self._record_slot(slot, response)
             if response.status_code == 200:
                 payload = response.content
+                self.network_bytes[slot] = self.network_bytes.get(slot, 0) + len(payload)
                 self._write_byte_cache(url, payload)
                 return payload
             if response.status_code == 401:
@@ -290,6 +306,49 @@ class GitHubClient:
                 last_error = GitHubRequestError(response.status_code, _error_message(response))
                 continue
             raise GitHubRequestError(response.status_code, _error_message(response))
+        if isinstance(last_error, GitHubRequestError):
+            raise last_error
+        raise GitHubRequestError(0, f"Request failed: {last_error}")
+
+    def _request_prefix(self, url: str, *, max_bytes: int, slot: str) -> tuple[bytes, bool]:
+        last_error: Exception | None = None
+        range_header = {"Range": f"bytes=0-{max_bytes - 1}"}
+        for attempt in range(4):
+            self._wait_slot(slot)
+            try:
+                response = self.session.get(
+                    url,
+                    headers={**_binary_headers(self.session), **range_header},
+                    timeout=self.timeout,
+                    stream=True,
+                )
+            except requests.RequestException as exc:
+                last_error = exc
+                time.sleep(min(2 ** attempt, 30))
+                continue
+            self.network_requests[slot] = self.network_requests.get(slot, 0) + 1
+            self._record_slot(slot, response)
+            try:
+                if response.status_code in {200, 206}:
+                    payload = _read_limited(response, max_bytes)
+                    self.network_bytes[slot] = self.network_bytes.get(slot, 0) + len(payload)
+                    complete = _prefix_is_complete(response, payload, max_bytes)
+                    if complete:
+                        self._write_byte_cache(url, payload)
+                    return payload, complete
+                if response.status_code == 401:
+                    raise GitHubAuthError(_error_message(response))
+                if response.status_code in {403, 429} and _is_rate_limit(response):
+                    time.sleep(_retry_delay(response, attempt))
+                    last_error = GitHubRequestError(response.status_code, _error_message(response))
+                    continue
+                if response.status_code in {502, 503, 504}:
+                    time.sleep(min(2 ** attempt, 30))
+                    last_error = GitHubRequestError(response.status_code, _error_message(response))
+                    continue
+                raise GitHubRequestError(response.status_code, _error_message(response))
+            finally:
+                response.close()
         if isinstance(last_error, GitHubRequestError):
             raise last_error
         raise GitHubRequestError(0, f"Request failed: {last_error}")
@@ -337,6 +396,37 @@ def _is_rate_limit(response: requests.Response) -> bool:
         return True
     remaining = response.headers.get("X-RateLimit-Remaining")
     return remaining == "0"
+
+
+def _read_limited(response: requests.Response, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    remaining = max_bytes
+    for chunk in response.iter_content(65536):
+        if not chunk or remaining <= 0:
+            break
+        chunks.append(chunk[:remaining])
+        remaining -= len(chunks[-1])
+    return b"".join(chunks)
+
+
+def _prefix_is_complete(response: requests.Response, payload: bytes, max_bytes: int) -> bool:
+    if response.status_code == 206:
+        total = _content_range_total(response.headers.get("Content-Range", ""))
+        return total is not None and total <= len(payload)
+    if len(payload) < max_bytes:
+        return True
+    declared = response.headers.get("Content-Length")
+    return declared is not None and declared.isdigit() and int(declared) <= len(payload)
+
+
+def _content_range_total(header: str) -> int | None:
+    # bytes 0-65535/90000
+    if "/" not in header:
+        return None
+    total = header.rsplit("/", 1)[-1].strip()
+    if total.isdigit():
+        return int(total)
+    return None
 
 
 def raw_content_url(full_name: str, commit_sha: str, path: str) -> str:

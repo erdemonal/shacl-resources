@@ -10,6 +10,7 @@ from shacl_study.shacl_vocab import NODE_SHAPE, PROPERTY_SHAPE, RDF_TYPE, SH, Sh
 
 SHACL_NAMESPACE_IRIS = (SH, "http://www.w3.org/ns/shacl")
 HTTPS_SHACL = "https://www.w3.org/ns/shacl#"
+_QUERY_LOCALS = frozenset({"select", "ask", "construct", "update"})
 
 
 @dataclass
@@ -36,11 +37,32 @@ def parse_rdf(payload: bytes, parser_format: str) -> Graph:
 
 
 def classify_graph(graph: Graph, vocab: ShaclVocabulary) -> GraphEvidence:
+    triples = list(graph)
+    linked_constraints = set()
+    typed_constraints = set()
+    query_subjects = set()
+    for subject, predicate, obj in triples:
+        predicate_iri = str(predicate)
+        if _local_name(predicate_iri) == "sparql" and _is_shacl_iri(predicate_iri):
+            linked_constraints.add(obj)
+        if predicate_iri == RDF_TYPE and _is_sparql_type(obj, vocab):
+            typed_constraints.add(subject)
+        if _local_name(predicate_iri) in _QUERY_LOCALS and _is_shacl_iri(predicate_iri):
+            query_subjects.add(subject)
     evidence = GraphEvidence()
-    for subject, predicate, obj in graph:
+    for subject, predicate, obj in triples:
         predicate_iri = str(predicate)
         object_iri = str(obj) if isinstance(obj, URIRef) else ""
         kind = _triple_kind(predicate_iri, object_iri, vocab)
+        structural = _sparql_structure(
+            subject,
+            predicate_iri,
+            obj,
+            kind,
+            linked_constraints=linked_constraints,
+            typed_constraints=typed_constraints,
+            query_subjects=query_subjects,
+        )
         if kind == "core_type_node":
             evidence.core_triples += 1
             evidence.node_shape_subjects.add(_subject_key(subject))
@@ -52,13 +74,57 @@ def classify_graph(graph: Graph, vocab: ShaclVocabulary) -> GraphEvidence:
         elif kind == "core":
             evidence.core_triples += 1
             evidence.evidence.add(_curie(predicate_iri))
-        elif kind == "sparql":
+        elif kind == "sparql" and structural:
             evidence.sparql_triples += 1
             evidence.evidence.add(_curie(predicate_iri))
         elif _mentions_shacl(subject, predicate, obj):
             evidence.other_triples += 1
-        _record_https(evidence, subject, predicate_iri, object_iri, vocab)
+        _record_https(evidence, subject, predicate_iri, object_iri, vocab, structural=structural)
     return evidence
+
+
+def _sparql_structure(
+    subject,
+    predicate_iri: str,
+    obj,
+    kind: str,
+    *,
+    linked_constraints: set,
+    typed_constraints: set,
+    query_subjects: set,
+) -> bool:
+    """Query-body predicates verify only inside a SHACL-SPARQL structure."""
+    if kind != "sparql":
+        return False
+    local = _local_name(predicate_iri)
+    if local in _QUERY_LOCALS:
+        return subject in linked_constraints or subject in typed_constraints
+    if local == "sparql":
+        return obj in query_subjects or obj in typed_constraints
+    return subject in linked_constraints or subject in typed_constraints
+
+
+def _is_sparql_type(obj, vocab: ShaclVocabulary) -> bool:
+    if not isinstance(obj, URIRef):
+        return False
+    iri = str(obj)
+    if iri in vocab.sparql_constraint_types:
+        return True
+    if iri.startswith(HTTPS_SHACL):
+        return (SH + iri[len(HTTPS_SHACL) :]) in vocab.sparql_constraint_types
+    return False
+
+
+def _is_shacl_iri(iri: str) -> bool:
+    return iri.startswith(SH) or iri.startswith(HTTPS_SHACL)
+
+
+def _local_name(iri: str) -> str:
+    if iri.startswith(HTTPS_SHACL):
+        return iri[len(HTTPS_SHACL) :]
+    if iri.startswith(SH):
+        return iri[len(SH) :]
+    return iri.rsplit("#", 1)[-1]
 
 
 def _triple_kind(predicate_iri: str, object_iri: str, vocab: ShaclVocabulary) -> str:
@@ -73,7 +139,15 @@ def _triple_kind(predicate_iri: str, object_iri: str, vocab: ShaclVocabulary) ->
     return ""
 
 
-def _record_https(evidence: GraphEvidence, subject, predicate_iri: str, object_iri: str, vocab: ShaclVocabulary) -> None:
+def _record_https(
+    evidence: GraphEvidence,
+    subject,
+    predicate_iri: str,
+    object_iri: str,
+    vocab: ShaclVocabulary,
+    *,
+    structural: bool,
+) -> None:
     """Record https namespace IRIs without rewriting them into the http namespace."""
     iris = []
     if isinstance(subject, URIRef):
@@ -88,7 +162,8 @@ def _record_https(evidence: GraphEvidence, subject, predicate_iri: str, object_i
             evidence.noncanonical_shape_terms.add(local)
     if predicate_iri.startswith(HTTPS_SHACL):
         local = predicate_iri[len(HTTPS_SHACL) :]
-        if local in _shape_locals(vocab):
+        core_locals = {iri.rsplit("#", 1)[-1] for iri in vocab.core_predicates}
+        if local in core_locals or (structural and local in _shape_locals(vocab)):
             evidence.noncanonical_shape_terms.add(local)
 
 

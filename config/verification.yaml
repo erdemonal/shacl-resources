@@ -6,6 +6,10 @@ max_file_bytes: 20971520
 max_candidate_files: 400
 max_archive_bytes: 209715200
 
+# Measured on the 80-repository benchmark at 20, 50, and 100.
+# Decisions were identical. 20 had the lowest wall time.
+tarball_candidate_threshold: 20
+
 strong_extensions:
   - .ttl
   - .trig

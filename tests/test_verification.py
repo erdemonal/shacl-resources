@@ -4,7 +4,8 @@ import tarfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from shacl_study.github_client import raw_content_url
+from shacl_study.discovery_hits import load_code_search_paths
+from shacl_study.github_client import ArchiveTooLarge, raw_content_url
 from shacl_study.shacl_vocab import default_vocabulary
 from shacl_study.verification import (
     FAILURE_COLUMNS,
@@ -68,16 +69,31 @@ NAME_ONLY = b"""\
 PREFIX_ONLY = b"@prefix sh: <http://www.w3.org/ns/shacl#> .\n"
 PLAIN = b"@prefix ex: <http://example.org/> .\nex:a ex:b ex:c .\n"
 BROKEN = b"@prefix sh: <http://www.w3.org/ns/shacl#> .\nthis is not turtle .\n"
+SELECT_ONLY = b"""\
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+[] sh:select \"SELECT * WHERE { ?s ?p ?o }\" .
+"""
+TYPED_SPARQL = b"""\
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+[] a sh:SPARQLConstraint ; sh:select \"SELECT $this WHERE { }\" .
+"""
+QUERY_CATALOG = b"""\
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+<http://example.org/NXQ> a sh:SPARQLExecutable, sh:SPARQLSelectExecutable ;
+  sh:select \"SELECT * WHERE { ?s ?p ?o }\" .
+"""
 
 
 class MemorySource:
-    def __init__(self, files, *, truncated=False, commit_error=None, tree_error=None, tarball=None, sizes=None):
+    def __init__(self, files, *, truncated=False, commit_error=None, tree_error=None, tarball=None, sizes=None, file_errors=None, extra=None):
         self.files = files
         self.truncated = truncated
         self.commit_error = commit_error
         self.tree_error = tree_error
         self.tarball = tarball
         self.sizes = sizes or {}
+        self.file_errors = file_errors or {}
+        self.extra = extra or {}
         self.calls = []
         self.commit_sha = "a" * 40
         self.tree_sha = "b" * 40
@@ -108,7 +124,20 @@ class MemorySource:
 
     def get_file(self, full_name, commit_sha, path):
         self.calls.append(("file", commit_sha, path))
+        if path in self.file_errors:
+            raise self.file_errors[path]
+        if path in self.extra:
+            return self.extra[path]
         return self.files[path]
+
+    def peek_file(self, full_name, commit_sha, path, max_bytes=65536):
+        self.calls.append(("peek", commit_sha, path))
+        if path in self.file_errors:
+            raise self.file_errors[path]
+        payload = self.extra.get(path, self.files[path])
+        if len(payload) <= max_bytes:
+            return payload, True
+        return payload[:max_bytes], False
 
     def list_tarball(self, full_name, commit_sha):
         self.calls.append(("tarball", commit_sha))
@@ -133,14 +162,19 @@ def _row(**overrides):
 
 def _inspect(files, **kwargs):
     row = kwargs.pop("row", _row())
+    hit_paths = kwargs.pop("hit_paths", None)
+    config_updates = kwargs.pop("config_updates", None)
     source = MemorySource(files, **kwargs)
     config = dict(CONFIG)
+    if config_updates:
+        config.update(config_updates)
     repository, file_rows, failures = inspect_repository(
         row,
         source=source,
         vocab=default_vocabulary(),
         config=config,
         clock=CLOCK,
+        hit_paths=hit_paths,
     )
     return repository, file_rows, failures, source
 
@@ -157,6 +191,10 @@ def test_vocabulary_keeps_sparql_out_of_core():
     assert "js" not in core
     assert "expression" not in core
     assert sparql == {"sparql", "ask", "select", "construct", "update"}
+    types = {iri.rsplit("#", 1)[-1] for iri in vocab.sparql_constraint_types}
+    assert "SPARQLConstraint" in types
+    assert "SPARQLSelectExecutable" not in types
+    assert "SPARQLExecutable" not in types
     assert {iri.rsplit("#", 1)[-1] for iri in vocab.excluded_components} == {
         "SPARQLConstraintComponent",
         "JSConstraintComponent",
@@ -189,6 +227,62 @@ def test_sparql_evidence_is_separate_from_core():
     assert int(repository["shacl_sparql_evidence_count"]) >= 2
     assert "sh:sparql" in repository["verification_evidence"]
     assert "sh:select" in repository["verification_evidence"]
+
+
+def test_standalone_sparql_select_does_not_verify():
+    repository, _, _, _ = _inspect({"query.ttl": SELECT_ONLY})
+    assert repository["verification_status"] != "verified_shacl"
+    assert repository["shacl_sparql_evidence_count"] == 0
+    typed, _, _, _ = _inspect({"constraint.ttl": TYPED_SPARQL})
+    assert typed["verification_status"] == "verified_shacl"
+    assert typed["verification_reason"] == "sparql_shape_evidence"
+    assert "sh:select" in typed["verification_evidence"]
+    catalog, _, _, _ = _inspect({"catalog.ttl": QUERY_CATALOG})
+    assert catalog["verification_status"] != "verified_shacl"
+    assert catalog["shacl_sparql_evidence_count"] == 0
+
+
+def test_tier1_verification_does_not_download_generic_xml():
+    repository, _, _, source = _inspect({"data/feed.xml": b"<not-rdf/>", "shapes/person.ttl": NODE})
+    assert repository["verification_status"] == "verified_shacl"
+    assert repository["verification_stopped_early"] is True
+    assert not any(call[0] in {"file", "peek"} and str(call[-1]).endswith(".xml") for call in source.calls)
+
+
+def test_unresolved_tier1_peeks_xml_instead_of_downloading_it():
+    repository, _, _, source = _inspect({"notes.ttl": PLAIN, "data/feed.xml": b"<not-rdf/>" * 20000})
+    assert repository["verification_status"] == "no_shacl_found"
+    assert ("peek", "a" * 40, "data/feed.xml") in source.calls
+    assert not any(call[0] == "file" and call[-1] == "data/feed.xml" for call in source.calls)
+
+
+def test_large_tier1_set_uses_one_tarball():
+    files = {f"f{index}.ttl": PLAIN for index in range(5)}
+    files["a.ttl"] = NODE
+    tarball = [
+        {"path": path, "size": len(payload), "content": payload, "too_large": False} for path, payload in files.items()
+    ]
+    repository, _, _, source = _inspect(
+        files,
+        tarball=tarball,
+        config_updates={"tarball_candidate_threshold": 3},
+    )
+    assert repository["verification_status"] == "verified_shacl"
+    assert repository["content_source"] == "codeload_tarball"
+    assert ("tarball", "a" * 40) in source.calls
+    assert not any(call[0] == "file" for call in source.calls)
+
+
+def test_oversized_tarball_falls_back_to_selective_files():
+    repository, _, failures, source = _inspect(
+        {"a.ttl": NODE, "b.ttl": PLAIN, "c.ttl": PLAIN},
+        tarball=ArchiveTooLarge(999),
+        config_updates={"tarball_candidate_threshold": 2},
+    )
+    assert repository["verification_status"] == "verified_shacl"
+    assert repository["content_source"] == "git_tree"
+    assert any(item["failure_kind"] == "tarball_over_size_cap" for item in failures)
+    assert any(call[0] == "file" for call in source.calls)
 
 
 def test_namespace_import_and_name_do_not_verify():
@@ -446,7 +540,7 @@ def test_https_shape_is_recorded_apart_from_canonical_verification():
 
 
 def test_https_does_not_replace_canonical_verification():
-    repository, _, _, _ = _inspect({"canonical.ttl": NODE, "https.ttl": HTTPS_SHAPE})
+    repository, _, _, _ = _inspect({"a-https.ttl": HTTPS_SHAPE, "b-canonical.ttl": NODE})
     assert repository["verification_status"] == "verified_shacl"
     assert repository["noncanonical_shacl_namespace_detected"] is True
     assert int(repository["node_shape_count"]) == 1
@@ -457,6 +551,89 @@ def test_https_import_without_a_shape_is_not_verified():
     assert repository["verification_status"] == "no_shacl_found"
     assert repository["noncanonical_shacl_namespace_detected"] is True
     assert repository["noncanonical_evidence"] == ""
+
+
+def test_discovery_hit_verifies_without_walking_the_tree():
+    repository, files, _, source = _inspect(
+        {"shapes/person.ttl": NODE, "other/noise.ttl": PLAIN},
+        hit_paths=["shapes/person.ttl", "README.md"],
+    )
+    assert repository["verification_status"] == "verified_shacl"
+    assert repository["verification_reason"] == "core_shape_evidence"
+    assert repository["verification_pass"] == "discovery_hit"
+    assert repository["evidence_path"] == "shapes/person.ttl"
+    assert repository["inspection_complete"] is False
+    assert repository["content_source"] == "discovery_hit"
+    assert repository["commit_sha_examined"] == "a" * 40
+    assert files[0]["path"] == "shapes/person.ttl"
+    assert ("tree", "b" * 40) not in source.calls
+    assert ("file", "a" * 40, "README.md") not in source.calls
+
+
+def test_unresolved_discovery_hit_falls_back_and_is_not_a_negative_finding():
+    repository, _, _, source = _inspect(
+        {"notes.md": b"# SHACL\n", "shapes/person.ttl": NODE},
+        hit_paths=["notes.md"],
+    )
+    assert repository["verification_status"] == "verified_shacl"
+    assert repository["verification_pass"] == "tree_inspection"
+    assert repository["evidence_path"] == "shapes/person.ttl"
+    assert ("tree", "b" * 40) in source.calls
+    assert repository["discovery_hit_files"] == 1
+
+
+def test_broken_discovery_hit_does_not_hide_a_clean_tree():
+    repository, _, _, _ = _inspect(
+        {"plain.ttl": PLAIN},
+        hit_paths=["orphan.ttl"],
+        extra={"orphan.ttl": BROKEN},
+    )
+    assert repository["verification_status"] == "no_shacl_found"
+    assert repository["verification_reason"] == "parsed_candidate_files_without_shacl_terms"
+    assert repository["verification_pass"] == "tree_inspection"
+
+
+def test_missing_discovery_hit_falls_back_to_the_tree():
+    repository, _, _, source = _inspect(
+        {"shapes/person.ttl": NODE},
+        hit_paths=["gone.ttl"],
+        file_errors={"gone.ttl": ClassifiedFailure("inaccessible", 404, "missing")},
+    )
+    assert repository["verification_status"] == "verified_shacl"
+    assert repository["verification_pass"] == "tree_inspection"
+    assert repository["evidence_path"] == "shapes/person.ttl"
+    assert ("file", "a" * 40, "gone.ttl") in source.calls
+    assert ("tree", "b" * 40) in source.calls
+
+
+def test_https_discovery_hit_is_not_canonical_and_falls_back():
+    repository, _, _, source = _inspect(
+        {"energy_shacl.ttl": HTTPS_SHAPE},
+        hit_paths=["energy_shacl.ttl"],
+    )
+    assert repository["verification_status"] == "noncanonical_shacl_namespace"
+    assert repository["verification_pass"] == "tree_inspection"
+    assert repository["noncanonical_shacl_namespace_detected"] is True
+    assert ("tree", "b" * 40) in source.calls
+
+
+def test_code_search_cache_keeps_the_matched_path(tmp_path):
+    payload = {
+        "total_count": 1,
+        "incomplete_results": False,
+        "items": [
+            {
+                "path": "examples/shape.ttl",
+                "repository": {"id": 42, "full_name": "acme/shapes"},
+            }
+        ],
+    }
+    (tmp_path / "page.json").write_text(__import__("json").dumps(payload), encoding="utf-8")
+    (tmp_path / "repo-search.json").write_text(
+        __import__("json").dumps({"items": [{"id": 7, "full_name": "acme/other"}]}),
+        encoding="utf-8",
+    )
+    assert load_code_search_paths(tmp_path) == {"42": ["examples/shape.ttl"]}
 
 
 def test_failure_class_separates_not_found_from_rate_limit():

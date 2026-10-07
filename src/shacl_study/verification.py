@@ -5,12 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import tarfile
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
+from shacl_study.discovery_hits import load_code_search_paths
 from shacl_study.github_client import (
     ArchiveTooLarge,
     GitHubAuthError,
@@ -75,6 +77,17 @@ REPO_COLUMNS = [
     "archived",
     "content_source",
     "prefilter_gate",
+    "verification_pass",
+    "evidence_path",
+    "discovery_hit_files",
+    "seconds_commit",
+    "seconds_tree",
+    "seconds_download",
+    "seconds_parse",
+    "verification_stopped_early",
+    "network_raw_requests",
+    "network_tarballs",
+    "network_bytes",
 ]
 FILE_COLUMNS = [
     "repository_id",
@@ -150,6 +163,15 @@ class Inspection:
     archive_too_large: bool = False
     tarball_failure: ClassifiedFailure | None = None
     files: list[FileResult] = field(default_factory=list)
+    verification_pass: str = ""
+    evidence_path: str = ""
+    discovery_hit_files: int = 0
+    seconds_commit: float = 0.0
+    seconds_tree: float = 0.0
+    seconds_download: float = 0.0
+    seconds_parse: float = 0.0
+    stopped_early: bool = False
+    tarball_skipped: str = ""
 
 
 def load_verification_config(path: Path) -> dict:
@@ -168,6 +190,7 @@ def load_verification_config(path: Path) -> dict:
     data["sniff_extensions"] = {str(key).lower(): value for key, value in data["sniff_extensions"].items()}
     data["max_file_bytes"] = int(data["max_file_bytes"])
     data["max_candidate_files"] = int(data["max_candidate_files"])
+    data["tarball_candidate_threshold"] = int(data.get("tarball_candidate_threshold") or 0)
     data["max_archive_bytes"] = int(data["max_archive_bytes"])
     return data
 
@@ -246,6 +269,41 @@ def select_pilot(rows: list[dict], size: int = 50) -> list[dict]:
     return selected
 
 
+def select_benchmark(
+    rows: list[dict],
+    count: int,
+    *,
+    pilot_ids: set[str],
+    full_inspection_ids: set[str],
+) -> list[dict]:
+    """Code-signal sample: prior full inspections, the pilot overlap, then cold repositories."""
+    code_rows = select_code_signal(rows)
+    by_id = {str(row["repository_id"]): row for row in code_rows}
+    selected: list[dict] = []
+    used: set[str] = set()
+
+    def take(ids: set[str], group: str) -> None:
+        ordered = sorted(ids, key=lambda value: int(value) if str(value).isdigit() else str(value))
+        for repository_id in ordered:
+            row = by_id.get(str(repository_id))
+            if row is None or str(repository_id) in used:
+                continue
+            picked = dict(row)
+            picked["benchmark_group"] = group
+            selected.append(picked)
+            used.add(str(repository_id))
+
+    take(full_inspection_ids, "full_inspection")
+    take(pilot_ids, "pilot")
+    need = max(0, count - len(selected))
+    pool = [row for row in code_rows if str(row["repository_id"]) not in used]
+    for row in _spaced(pool, need):
+        picked = dict(row)
+        picked["benchmark_group"] = "cold"
+        selected.append(picked)
+    return selected
+
+
 def inspect_repository(
     row: dict,
     *,
@@ -253,22 +311,138 @@ def inspect_repository(
     vocab: ShaclVocabulary,
     config: dict,
     clock,
+    hit_paths: list[str] | None = None,
 ) -> tuple[dict, list[dict], list[dict]]:
     timestamp = clock().strftime("%Y-%m-%dT%H:%M:%SZ")
     prefilter_gate = not has_code_signal(row.get("discovered_by", ""))
-    inspection = _collect(row, source=source, config=config)
+    paths = _ordered_hit_paths(hit_paths or [])
+    use_hits = bool(paths) and not prefilter_gate
+    inspection: Inspection | None = None
+    if use_hits:
+        hit_inspection, stop = _discovery_hit_pass(
+            row,
+            paths,
+            source=source,
+            config=config,
+        )
+        if stop:
+            inspection = hit_inspection
+        else:
+            inspection = _collect(row, source=source, config=config)
+            inspection.seconds_commit += hit_inspection.seconds_commit
+            inspection.seconds_download += hit_inspection.seconds_download
+            inspection.seconds_parse += hit_inspection.seconds_parse
+            inspection.discovery_hit_files = hit_inspection.discovery_hit_files
+            inspection.verification_pass = "tree_inspection"
+    if inspection is None:
+        inspection = _collect(row, source=source, config=config)
+        inspection.verification_pass = "tree_inspection"
     repository_row, failures = _decide(
         row,
         inspection,
         prefilter_gate=prefilter_gate,
         timestamp=timestamp,
     )
+    _annotate_pass(repository_row, inspection)
     file_rows = [
         _file_row(row, inspection.commit_sha, item)
         for item in inspection.files
         if item.accepted
     ]
     return repository_row, file_rows, failures
+
+
+def _ordered_hit_paths(paths: list[str]) -> list[str]:
+    safe = [path for path in paths if path and not _unsafe_path(path)]
+    return sorted(dict.fromkeys(safe), key=lambda path: (_hit_rank(path), path))
+
+
+def _hit_rank(path: str) -> int:
+    extension = _extension(path)
+    if extension in {".ttl", ".trig", ".n3", ".nt", ".nq", ".rdf", ".owl", ".jsonld", ".json-ld", ".shacl"}:
+        return 0
+    if extension in {".xml", ".json"}:
+        return 1
+    return 2
+
+
+def _discovery_hit_pass(row: dict, paths: list[str], *, source, config: dict) -> tuple[Inspection, bool]:
+    """Return (inspection, stop). Stop is false when the hits do not establish SHACL.
+
+    A false stop flag is not a negative finding. The caller inspects the tree.
+    """
+    inspection = Inspection(discovery_hit_files=len(paths))
+    full_name = row["repository_full_name"]
+    branch = row.get("default_branch") or ""
+    if not branch:
+        inspection.access_kind = "inaccessible"
+        inspection.access_reason = "missing_default_branch"
+        inspection.access_detail = "Candidate row has no default branch."
+        inspection.verification_pass = "access_failure"
+        return inspection, True
+    try:
+        started = time.perf_counter()
+        pin = source.resolve_commit(full_name, branch)
+        inspection.seconds_commit += time.perf_counter() - started
+    except ClassifiedFailure as exc:
+        inspection.access_kind = exc.kind
+        inspection.access_reason = f"commit_{exc.kind}"
+        inspection.access_status = exc.status
+        inspection.access_detail = exc.detail
+        inspection.verification_pass = "access_failure"
+        return inspection, True
+    inspection.commit_sha = pin["commit_sha"]
+    inspection.tree_sha = pin["tree_sha"]
+    needles = _needles(config)
+    for path in paths:
+        result = FileResult(path=path, candidate_rule=raw_extension_rule(path, config))
+        try:
+            started = time.perf_counter()
+            payload = source.get_file(full_name, inspection.commit_sha, path)
+            inspection.seconds_download += time.perf_counter() - started
+        except ClassifiedFailure as exc:
+            result.accepted = True
+            result.fetch_status = "fetch_error"
+            result.parse_status = "fetch_error"
+            result.failure_kind = exc.kind
+            result.http_status = exc.status
+            result.failure_detail = exc.detail
+            inspection.files.append(result)
+            continue
+        _consume_payload(result, payload, config=config, needles=needles)
+        inspection.files.append(result)
+        _parse_when_required(inspection, prefilter_gate=False)
+        if result.evidence and result.evidence.verifies:
+            inspection.content_source = "discovery_hit"
+            inspection.verification_pass = "discovery_hit"
+            inspection.evidence_path = path
+            return inspection, True
+    return inspection, False
+
+
+def _annotate_pass(repository: dict, inspection: Inspection) -> None:
+    repository["verification_pass"] = inspection.verification_pass or "tree_inspection"
+    repository["evidence_path"] = inspection.evidence_path or _first_verifying_path(inspection)
+    repository["discovery_hit_files"] = inspection.discovery_hit_files
+    repository["seconds_commit"] = f"{inspection.seconds_commit:.3f}"
+    repository["seconds_tree"] = f"{inspection.seconds_tree:.3f}"
+    repository["seconds_download"] = f"{inspection.seconds_download:.3f}"
+    repository["seconds_parse"] = f"{inspection.seconds_parse:.3f}"
+    repository["verification_stopped_early"] = inspection.stopped_early
+    repository["network_raw_requests"] = 0
+    repository["network_tarballs"] = 0
+    repository["network_bytes"] = 0
+    if repository["verification_pass"] == "discovery_hit" or inspection.stopped_early:
+        repository["inspection_complete"] = False
+    if repository["verification_pass"] == "discovery_hit":
+        repository["content_source"] = "discovery_hit"
+
+
+def _first_verifying_path(inspection: Inspection) -> str:
+    for item in inspection.files:
+        if item.accepted and item.evidence and item.evidence.verifies:
+            return item.path
+    return ""
 
 
 def tarball_entries(archive: Path, config: dict) -> list[dict]:
@@ -312,6 +486,9 @@ class GitHubContent:
     def get_file(self, full_name: str, commit_sha: str, path: str) -> bytes:
         return _translate(lambda: self.client.get_raw_file(full_name, commit_sha, path))
 
+    def peek_file(self, full_name: str, commit_sha: str, path: str, max_bytes: int = 65536) -> tuple[bytes, bool]:
+        return _translate(lambda: self.client.peek_raw_file(full_name, commit_sha, path, max_bytes=max_bytes))
+
     def list_tarball(self, full_name: str, commit_sha: str) -> list[dict]:
         try:
             archive = self.client.download_tarball(
@@ -340,10 +517,15 @@ def run_verification(
     phase: str = "",
     git_commit: str | None = None,
     git_dirty: bool | None = None,
+    state_path: Path | None = None,
+    results_dir: Path | None = None,
+    hit_index: dict[str, list[str]] | None = None,
 ) -> dict:
     vocab = vocab or default_vocabulary()
-    state_path = data_dir / "candidates" / "verification_state.json"
+    state_path = state_path or (data_dir / "candidates" / "verification_state.json")
     state = _load_state(state_path, config_digest, vocab.sha256, fresh)
+    if hit_index is None:
+        hit_index = load_code_search_paths(data_dir / "raw" / "github-cache")
     if phase == "1":
         _write_phase_manifest(
             data_dir / "results" / "phase1_manifest.json",
@@ -379,12 +561,23 @@ def run_verification(
             row["repository_full_name"],
             row.get("pilot_stratum", ""),
         )
+        client = getattr(source, "client", None)
+        requests_before = dict(getattr(client, "network_requests", {}) or {})
+        bytes_before = dict(getattr(client, "network_bytes", {}) or {})
         repository, files, failures = inspect_repository(
             row,
             source=source,
             vocab=vocab,
             config=config,
             clock=clock,
+            hit_paths=hit_index.get(key, []),
+        )
+        requests_after = dict(getattr(client, "network_requests", {}) or {})
+        bytes_after = dict(getattr(client, "network_bytes", {}) or {})
+        repository["network_raw_requests"] = requests_after.get("raw", 0) - requests_before.get("raw", 0)
+        repository["network_tarballs"] = requests_after.get("codeload", 0) - requests_before.get("codeload", 0)
+        repository["network_bytes"] = (bytes_after.get("raw", 0) + bytes_after.get("codeload", 0)) - (
+            bytes_before.get("raw", 0) + bytes_before.get("codeload", 0)
         )
         state["repositories"][key] = {"repository": repository, "files": files, "failures": failures}
         if repository["verification_status"] != "transient_failure":
@@ -398,7 +591,7 @@ def run_verification(
             repository["verification_status"],
             repository["inspection_complete"],
         )
-    results = data_dir / "results"
+    results = results_dir or (data_dir / "results")
     write_csv(results / "repository_verification.csv", REPO_COLUMNS, repository_rows)
     write_csv(results / "shacl_file_verification.csv", FILE_COLUMNS, file_rows)
     write_csv(results / "milestone2_failures.csv", FAILURE_COLUMNS, failure_rows)
@@ -433,7 +626,9 @@ def _collect(row: dict, *, source, config: dict) -> Inspection:
         inspection.access_detail = "Candidate row has no default branch."
         return inspection
     try:
+        started = time.perf_counter()
         pin = source.resolve_commit(full_name, branch)
+        inspection.seconds_commit += time.perf_counter() - started
     except ClassifiedFailure as exc:
         inspection.access_kind = exc.kind
         inspection.access_reason = f"commit_{exc.kind}"
@@ -443,7 +638,9 @@ def _collect(row: dict, *, source, config: dict) -> Inspection:
     inspection.commit_sha = pin["commit_sha"]
     inspection.tree_sha = pin["tree_sha"]
     try:
+        started = time.perf_counter()
         tree = source.get_tree(full_name, pin["tree_sha"])
+        inspection.seconds_tree += time.perf_counter() - started
     except ClassifiedFailure as exc:
         inspection.access_kind = exc.kind
         inspection.access_reason = f"tree_{exc.kind}"
@@ -453,7 +650,9 @@ def _collect(row: dict, *, source, config: dict) -> Inspection:
     if tree.get("truncated"):
         inspection.content_source = "codeload_tarball"
         try:
+            started = time.perf_counter()
             blobs = source.list_tarball(full_name, pin["commit_sha"])
+            inspection.seconds_download += time.perf_counter() - started
         except ArchiveTooLarge as exc:
             inspection.archive_too_large = True
             inspection.access_detail = str(exc)
@@ -461,7 +660,7 @@ def _collect(row: dict, *, source, config: dict) -> Inspection:
         except ClassifiedFailure as exc:
             inspection.tarball_failure = exc
             return inspection
-        _examine_known_blobs(inspection, row, blobs, config=config, vocab_needles=_needles(config))
+        _inspect_tiers(inspection, row, blobs, source=source, config=config, local=True)
         return inspection
     inspection.content_source = "git_tree"
     entries = []
@@ -472,63 +671,152 @@ def _collect(row: dict, *, source, config: dict) -> Inspection:
         if _unsafe_path(path) or not raw_extension_rule(path, config):
             continue
         entries.append({"path": path, "size": item.get("size"), "content": None, "too_large": False})
-    _examine_tree_entries(
-        inspection,
-        row,
-        entries,
-        source=source,
-        config=config,
-    )
+    _inspect_tiers(inspection, row, entries, source=source, config=config, local=False)
     return inspection
 
 
-def _examine_tree_entries(inspection: Inspection, row: dict, entries: list[dict], *, source, config: dict) -> None:
-    inspection.heuristic_paths = len(entries)
-    chosen, inspection.cap_hit = _cap_entries(entries, int(config["max_candidate_files"]))
+def _inspect_tiers(
+    inspection: Inspection,
+    row: dict,
+    entries: list[dict],
+    *,
+    source,
+    config: dict,
+    local: bool,
+) -> None:
+    """Tier-1 RDF extensions first. A large candidate set can use one pinned tarball."""
+    tier1, tier2 = _partition_tiers(entries, config)
+    inspection.heuristic_paths = len(tier1) + len(tier2)
+    threshold = int(config.get("tarball_candidate_threshold") or 0)
+    if not local and threshold and len(tier1) >= threshold and _use_tarball(inspection, row, source, config):
+        return
+    verified = _walk_tier(inspection, row, tier1, source=source, config=config, local=local, tier2_remaining=bool(tier2))
+    if verified or inspection.cap_hit:
+        return
+    if not local and threshold and len(tier2) >= threshold and _use_tarball(inspection, row, source, config):
+        return
+    _walk_tier(inspection, row, tier2, source=source, config=config, local=local, tier2_remaining=False)
+
+
+def _partition_tiers(entries: list[dict], config: dict) -> tuple[list[dict], list[dict]]:
+    tier1: list[dict] = []
+    tier2: list[dict] = []
+    for entry in entries:
+        rule = raw_extension_rule(str(entry.get("path") or ""), config)
+        if rule.startswith("extension:"):
+            tier1.append(entry)
+        elif rule.startswith("provisional:"):
+            tier2.append(entry)
+    return tier1, tier2
+
+
+def _use_tarball(inspection: Inspection, row: dict, source, config: dict) -> bool:
+    try:
+        started = time.perf_counter()
+        blobs = source.list_tarball(row["repository_full_name"], inspection.commit_sha)
+        inspection.seconds_download += time.perf_counter() - started
+    except ArchiveTooLarge as exc:
+        inspection.tarball_skipped = str(exc)
+        return False
+    except ClassifiedFailure as exc:
+        inspection.tarball_skipped = exc.detail
+        return False
+    inspection.content_source = "codeload_tarball"
+    inspection.files = []
+    inspection.cap_hit = False
+    inspection.stopped_early = False
+    _inspect_tiers(inspection, row, blobs, source=source, config=config, local=True)
+    return True
+
+
+def _walk_tier(
+    inspection: Inspection,
+    row: dict,
+    entries: list[dict],
+    *,
+    source,
+    config: dict,
+    local: bool,
+    tier2_remaining: bool,
+) -> bool:
+    limit = int(config["max_candidate_files"])
+    already = sum(1 for item in inspection.files if item.accepted or item.fetch_status)
+    room = max(0, limit - already)
+    chosen, capped = _cap_entries(entries, room)
+    if capped or (tier2_remaining and room == 0 and entries):
+        inspection.cap_hit = True
     needles = _needles(config)
-    for entry in chosen:
-        path = entry["path"]
-        result = FileResult(path=path, candidate_rule=raw_extension_rule(path, config))
-        size = entry.get("size")
-        if isinstance(size, int) and size > int(config["max_file_bytes"]):
-            result.accepted = True
-            result.byte_size = size
-            result.fetch_status = "skipped_too_large"
-            result.parse_status = "skipped_too_large"
-            result.failure_kind = "skipped_too_large"
-            inspection.files.append(result)
-            continue
-        try:
-            payload = source.get_file(row["repository_full_name"], inspection.commit_sha, path)
-        except ClassifiedFailure as exc:
-            result.accepted = not result.candidate_rule.startswith("provisional:")
-            result.fetch_status = "fetch_error"
-            result.failure_kind = exc.kind
-            result.http_status = exc.status
-            result.failure_detail = exc.detail
-            result.parse_status = "fetch_error"
-            inspection.files.append(result)
-            continue
-        _consume_payload(result, payload, config=config, needles=needles)
+    prefilter_gate = not has_code_signal(row.get("discovered_by", ""))
+    for index, entry in enumerate(chosen):
+        result = _load_candidate(inspection, row, entry, source=source, config=config, local=local, needles=needles)
         inspection.files.append(result)
+        if not result.accepted or result.parse_status != "not_parsed":
+            continue
+        _parse_when_required(inspection, prefilter_gate=prefilter_gate)
+        if result.evidence and result.evidence.verifies:
+            more_in_tier = index + 1 < len(chosen)
+            if more_in_tier or tier2_remaining:
+                inspection.stopped_early = True
+            return True
+    return False
 
 
-def _examine_known_blobs(inspection: Inspection, row: dict, blobs: list[dict], *, config: dict, vocab_needles) -> None:
-    del row
-    inspection.heuristic_paths = len(blobs)
-    chosen, inspection.cap_hit = _cap_entries(blobs, int(config["max_candidate_files"]))
-    for entry in chosen:
-        result = FileResult(path=entry["path"], candidate_rule=raw_extension_rule(entry["path"], config))
+def _load_candidate(
+    inspection: Inspection,
+    row: dict,
+    entry: dict,
+    *,
+    source,
+    config: dict,
+    local: bool,
+    needles: tuple[str, ...],
+) -> FileResult:
+    path = str(entry.get("path") or "")
+    result = FileResult(path=path, candidate_rule=raw_extension_rule(path, config))
+    if local:
         if entry.get("too_large"):
             result.accepted = True
             result.byte_size = int(entry.get("size") or 0)
             result.fetch_status = "skipped_too_large"
             result.parse_status = "skipped_too_large"
             result.failure_kind = "skipped_too_large"
-            inspection.files.append(result)
-            continue
-        _consume_payload(result, entry.get("content") or b"", config=config, needles=vocab_needles)
-        inspection.files.append(result)
+            return result
+        _consume_payload(result, entry.get("content") or b"", config=config, needles=needles)
+        return result
+    size = entry.get("size")
+    if isinstance(size, int) and size > int(config["max_file_bytes"]):
+        result.accepted = True
+        result.byte_size = size
+        result.fetch_status = "skipped_too_large"
+        result.parse_status = "skipped_too_large"
+        result.failure_kind = "skipped_too_large"
+        return result
+    try:
+        started = time.perf_counter()
+        if result.candidate_rule.startswith("provisional:") and hasattr(source, "peek_file"):
+            prefix, complete = source.peek_file(row["repository_full_name"], inspection.commit_sha, path)
+            extension = result.candidate_rule.removeprefix("provisional:")
+            if not _sniff(extension, prefix):
+                result.accepted = False
+                result.fetch_status = "fetched"
+                result.parse_status = "sniff_rejected"
+                result.byte_size = len(prefix)
+                inspection.seconds_download += time.perf_counter() - started
+                return result
+            payload = prefix if complete else source.get_file(row["repository_full_name"], inspection.commit_sha, path)
+        else:
+            payload = source.get_file(row["repository_full_name"], inspection.commit_sha, path)
+        inspection.seconds_download += time.perf_counter() - started
+    except ClassifiedFailure as exc:
+        result.accepted = not result.candidate_rule.startswith("provisional:")
+        result.fetch_status = "fetch_error"
+        result.failure_kind = exc.kind
+        result.http_status = exc.status
+        result.failure_detail = exc.detail
+        result.parse_status = "fetch_error"
+        return result
+    _consume_payload(result, payload, config=config, needles=needles)
+    return result
 
 
 def _decide(row: dict, inspection: Inspection, *, prefilter_gate: bool, timestamp: str) -> tuple[dict, list[dict]]:
@@ -583,6 +871,10 @@ def _decide(row: dict, inspection: Inspection, *, prefilter_gate: bool, timestam
         failures.append(
             _failure(row, inspection.commit_sha, "", "incomplete_inspection", None, inspection.access_detail)
         )
+    if inspection.tarball_skipped:
+        failures.append(
+            _failure(row, inspection.commit_sha, "", "tarball_over_size_cap", None, inspection.tarball_skipped)
+        )
     if inspection.tarball_failure is not None:
         kind = "transient_failure" if inspection.tarball_failure.kind == "transient" else "inaccessible"
         failures.append(
@@ -628,6 +920,7 @@ def _parse_when_required(inspection: Inspection, *, prefilter_gate: bool) -> Non
     if prefilter_gate and not any(item.text_hit for item in accepted):
         return
     vocab = _vocab_for_parse()
+    started = time.perf_counter()
     for result in accepted:
         if result.parse_status != "not_parsed":
             continue
@@ -659,6 +952,7 @@ def _parse_when_required(inspection: Inspection, *, prefilter_gate: bool) -> Non
             continue
         result.parse_status = "parsed"
         result.evidence = classify_graph(graph, vocab)
+    inspection.seconds_parse += time.perf_counter() - started
 
 
 def _vocab_for_parse() -> ShaclVocabulary:
@@ -943,7 +1237,11 @@ def _summary(
     return {
         "milestone": 2,
         "phase": phase or None,
-        "mode": "phase1" if phase == "1" else ("pilot" if any(row.get("pilot_stratum") for row in rows) else "selection"),
+        "mode": (
+            "phase1"
+            if phase == "1"
+            else ("benchmark" if any(row.get("benchmark_group") for row in rows) else ("pilot" if any(row.get("pilot_stratum") for row in rows) else "selection"))
+        ),
         "git_commit": git_commit,
         "git_dirty": git_dirty,
         "collected_at": clock().strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -961,11 +1259,18 @@ def _summary(
             "verified_shacl": (
                 "At least one parsed RDF graph contains rdf:type sh:NodeShape, "
                 "rdf:type sh:PropertyShape, a derived SHACL Core target or constraint-parameter "
-                "predicate, sh:path as declared for property shapes, or a derived SHACL-SPARQL "
-                "evidence predicate (sh:sparql, sh:select, sh:ask, sh:construct, sh:update). "
+                "predicate, sh:path as declared for property shapes, or a structurally attached "
+                "SHACL-SPARQL constraint. sh:select, sh:ask, sh:construct, and sh:update verify "
+                "only when the subject is the object of sh:sparql or is typed as sh:SPARQLConstraint "
+                "or a subclass of it. A standalone query predicate, or a query typed only as "
+                "sh:SPARQLExecutable, does not verify. "
                 "A SHACL namespace IRI alone does not verify. "
                 "https://www.w3.org/ns/shacl# is not rewritten to the canonical http namespace. "
-                "Shape structures that use only the https IRI are noncanonical_shacl_namespace."
+                "Shape structures that use only the https IRI are noncanonical_shacl_namespace. "
+                "A cached code-search path that parses with canonical evidence verifies the repository "
+                "without a full tree walk. That result is a verification decision only: inspection_complete "
+                "stays false because the repository's shapes were not enumerated. An unresolved hit is not "
+                "no_shacl_found; the repository then receives the tree inspection."
             ),
             "prefilter": (
                 "Repositories with no code-search signal are parsed only when a candidate file's "

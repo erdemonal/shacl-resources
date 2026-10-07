@@ -1,7 +1,10 @@
 import argparse
 import csv
 import importlib.metadata
+import json
+import math
 import os
+import statistics
 import subprocess
 import sys
 from datetime import date, datetime, timezone
@@ -17,6 +20,7 @@ from shacl_study.verification import (
     config_sha256,
     load_verification_config,
     run_verification,
+    select_benchmark,
     select_code_signal,
     select_pilot,
 )
@@ -47,9 +51,18 @@ def main(argv: list[str] | None = None) -> None:
     verify.add_argument("--data-dir", default="data")
     verify.add_argument("--pilot", type=int, default=None, help="Inspect a stratified pilot of this many repositories.")
     verify.add_argument("--phase", type=int, choices=[1], default=None, help="Phase 1 verifies code-search repositories only.")
+    verify.add_argument(
+        "--benchmark",
+        type=int,
+        default=None,
+        help="Time the two-pass strategy on this many code-signal repositories. Does not start Phase 1.",
+    )
     verify.add_argument("--full-corpus", action="store_true")
     verify.add_argument("--fresh", action="store_true", help="Ignore saved verification state.")
     verify.add_argument("--repository-id", action="append", default=None)
+    verify.add_argument("--tarball-threshold", type=int, default=None, help="Use one tarball when the candidate tier reaches this size.")
+    verify.add_argument("--cache-dir", default=None, help="GitHub response cache. Defaults to data/raw/github-cache.")
+    verify.add_argument("--benchmark-name", default="phase1_benchmark")
     for name in NOT_IN_MILESTONE:
         subparsers.add_parser(name, help="Not implemented.")
 
@@ -107,15 +120,32 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def _verify(args) -> None:
-    selected = [args.pilot is not None, args.phase is not None, args.full_corpus, bool(args.repository_id)]
+    selected = [
+        args.pilot is not None,
+        args.phase is not None,
+        args.full_corpus,
+        bool(args.repository_id),
+        args.benchmark is not None,
+    ]
     if sum(bool(item) for item in selected) != 1:
-        raise SystemExit("Refusing an unscoped verification run. Pass --pilot N, --phase 1, or --repository-id. --full-corpus is separate.")
+        raise SystemExit(
+            "Refusing an unscoped verification run. Pass --pilot N, --phase 1, --benchmark N, or --repository-id. "
+            "--full-corpus is separate."
+        )
     if args.pilot is not None and args.full_corpus:
         raise SystemExit("Pass either --pilot or --full-corpus.")
     if args.pilot is not None and args.pilot < 1:
         raise SystemExit("--pilot must be at least 1.")
+    if args.benchmark is not None and args.benchmark < 1:
+        raise SystemExit("--benchmark must be at least 1.")
+    if args.tarball_threshold is not None and args.tarball_threshold < 1:
+        raise SystemExit("--tarball-threshold must be at least 1.")
     config_path = Path(args.config)
     config = load_verification_config(config_path)
+    if args.tarball_threshold is not None:
+        config["tarball_candidate_threshold"] = args.tarball_threshold
+    data_dir = Path(args.data_dir)
+    groups: dict[str, str] = {}
     with Path(args.candidates).open(encoding="utf-8", newline="") as handle:
         candidates = list(csv.DictReader(handle))
     if args.repository_id:
@@ -129,17 +159,35 @@ def _verify(args) -> None:
     elif args.phase == 1:
         rows = select_code_signal(candidates)
         print(f"phase=1 code_signal_repositories={len(rows)}")
+    elif args.benchmark is not None:
+        pilot_ids = _repository_ids(data_dir / "pilot" / "milestone2" / "repository_verification.csv")
+        full_ids = _state_repository_ids(data_dir / "candidates" / "verification_state.json")
+        rows = select_benchmark(
+            candidates,
+            args.benchmark,
+            pilot_ids=pilot_ids,
+            full_inspection_ids=full_ids,
+        )
+        groups = {str(row["repository_id"]): row.get("benchmark_group", "") for row in rows}
+        print(
+            "benchmark "
+            f"repositories={len(rows)} "
+            f"full_inspection={sum(group == 'full_inspection' for group in groups.values())} "
+            f"pilot={sum(group == 'pilot' for group in groups.values())} "
+            f"cold={sum(group == 'cold' for group in groups.values())}"
+        )
     else:
         rows = candidates
     if not rows:
         raise SystemExit("No repositories selected.")
     _load_dotenv(Path(".env"))
     token = os.environ.get("GITHUB_TOKEN", "")
-    data_dir = Path(args.data_dir)
     logger = configure_logging(data_dir / "logs" / "verification.log")
     commit, dirty = _git_info(Path.cwd())
+    benchmark_dir = data_dir / "results" / (args.benchmark_name or "phase1_benchmark")
     try:
-        client = GitHubClient(token, data_dir / "raw" / "github-cache")
+        cache_dir = Path(args.cache_dir) if args.cache_dir else data_dir / "raw" / "github-cache"
+        client = GitHubClient(token, cache_dir)
         summary = run_verification(
             rows=rows,
             source=GitHubContent(client, config),
@@ -153,11 +201,183 @@ def _verify(args) -> None:
             phase=str(args.phase or ""),
             git_commit=commit,
             git_dirty=dirty,
+            state_path=(benchmark_dir / "state.json") if args.benchmark is not None else None,
+            results_dir=benchmark_dir if args.benchmark is not None else None,
         )
     except GitHubAuthError as exc:
         raise SystemExit(str(exc)) from exc
     counts = " ".join(f"{key}={value}" for key, value in sorted(summary["status_counts"].items()))
     print(f"verified_repositories={summary['repository_count']} {counts}")
+    if args.benchmark is not None:
+        report = _benchmark_report(
+            data_dir,
+            groups,
+            results_dir=benchmark_dir,
+            pilot_ids=_repository_ids(data_dir / "pilot" / "milestone2" / "repository_verification.csv"),
+            full_ids=_state_repository_ids(data_dir / "candidates" / "verification_state.json"),
+        )
+        report_path = benchmark_dir / "benchmark_report.json"
+        report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        cold = report["cold_seconds"]
+        print(
+            "benchmark_report "
+            f"discovery_hit={report['verified_from_discovery_hit']} "
+            f"tree_inspection={report['tree_inspection']} "
+            f"cold_median_s={cold['median']} "
+            f"cold_mean_s={cold['mean']} "
+            f"disagreements={report['disagreement_count']}"
+        )
+
+
+def _repository_ids(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    with path.open(encoding="utf-8", newline="") as handle:
+        return {row["repository_id"] for row in csv.DictReader(handle) if row.get("repository_id")}
+
+
+def _state_repository_ids(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return set((payload.get("repositories") or {}).keys())
+
+
+def _benchmark_report(
+    data_dir: Path,
+    groups: dict[str, str],
+    *,
+    results_dir: Path,
+    pilot_ids: set[str],
+    full_ids: set[str],
+) -> dict:
+    results_path = results_dir / "repository_verification.csv"
+    with results_path.open(encoding="utf-8", newline="") as handle:
+        results = list(csv.DictReader(handle))
+    pilot = _status_map(data_dir / "pilot" / "milestone2" / "repository_verification.csv")
+    full = _full_inspection_statuses(data_dir / "candidates" / "verification_state.json")
+    previous_benchmark = _status_map(data_dir / "results" / "phase1_benchmark" / "repository_verification.csv")
+    if results_dir.resolve() == (data_dir / "results" / "phase1_benchmark").resolve():
+        previous_benchmark = {}
+    disagreements = []
+    discovery_hit = 0
+    tree_inspection = 0
+    cold_seconds: list[float] = []
+    for row in results:
+        repository_id = str(row["repository_id"])
+        group = groups.get(repository_id, "")
+        if row.get("verification_pass") == "discovery_hit":
+            discovery_hit += 1
+        elif row.get("verification_pass") == "tree_inspection":
+            tree_inspection += 1
+        if group == "cold":
+            cold_seconds.append(_inspection_seconds(row))
+        previous = None
+        source = ""
+        if repository_id in full:
+            previous = full[repository_id]
+            source = "full_inspection"
+        elif repository_id in pilot:
+            previous = pilot.get(repository_id)
+            source = "pilot"
+        benchmark_previous = previous_benchmark.get(repository_id)
+        if benchmark_previous and benchmark_previous != row["verification_status"]:
+            disagreements.append(
+                {
+                    "repository_id": repository_id,
+                    "repository_full_name": row["repository_full_name"],
+                    "benchmark_group": group,
+                    "previous_source": "previous_benchmark",
+                    "previous_status": benchmark_previous,
+                    "benchmark_status": row["verification_status"],
+                    "benchmark_reason": row["verification_reason"],
+                    "verification_pass": row["verification_pass"],
+                    "evidence_path": row["evidence_path"],
+                }
+            )
+        if previous and previous != row["verification_status"]:
+            disagreements.append(
+                {
+                    "repository_id": repository_id,
+                    "repository_full_name": row["repository_full_name"],
+                    "benchmark_group": group,
+                    "previous_source": source,
+                    "previous_status": previous,
+                    "benchmark_status": row["verification_status"],
+                    "benchmark_reason": row["verification_reason"],
+                    "verification_pass": row["verification_pass"],
+                    "evidence_path": row["evidence_path"],
+                }
+            )
+    total = len(results) or 1
+    return {
+        "repository_count": len(results),
+        "verified_from_discovery_hit": discovery_hit,
+        "tree_inspection": tree_inspection,
+        "discovery_hit_percent": round(100 * discovery_hit / total, 2),
+        "tree_inspection_percent": round(100 * tree_inspection / total, 2),
+        "cold_seconds": _seconds_summary(cold_seconds),
+        "all_seconds": _seconds_summary([_inspection_seconds(row) for row in results]),
+        "tarball_repositories": sum(1 for row in results if row.get("content_source") == "codeload_tarball"),
+        "tarball_percent": round(100 * sum(1 for row in results if row.get("content_source") == "codeload_tarball") / total, 2),
+        "network_raw_requests": sum(int(row.get("network_raw_requests") or 0) for row in results),
+        "network_tarballs": sum(int(row.get("network_tarballs") or 0) for row in results),
+        "network_bytes": sum(int(row.get("network_bytes") or 0) for row in results),
+        "projected_hours_for_2908_from_cold_mean": (
+            None if not cold_seconds else round((statistics.fmean(cold_seconds) * 2908) / 3600, 2)
+        ),
+        "disagreement_count": len(disagreements),
+        "disagreements": disagreements,
+        "note": (
+            "discovery_hit verifies a repository from a cached code-search path and does not enumerate "
+            "every SHACL file. inspection_complete stays false for that pass. "
+            "A status change from incomplete_inspection to verified_shacl means the hit established "
+            "canonical evidence where the 400-file walk did not finish."
+        ),
+    }
+
+
+def _status_map(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    with path.open(encoding="utf-8", newline="") as handle:
+        return {row["repository_id"]: row["verification_status"] for row in csv.DictReader(handle)}
+
+
+def _full_inspection_statuses(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    statuses = {}
+    for repository_id, blob in (payload.get("repositories") or {}).items():
+        repository = blob.get("repository") or {}
+        if repository.get("verification_status"):
+            statuses[str(repository_id)] = repository["verification_status"]
+    return statuses
+
+
+def _inspection_seconds(row: dict) -> float:
+    return sum(float(row.get(name) or 0) for name in ("seconds_commit", "seconds_tree", "seconds_download", "seconds_parse"))
+
+
+def _seconds_summary(values: list[float]) -> dict:
+    if not values:
+        return {"count": 0, "mean": None, "median": None, "min": None, "max": None}
+    return {
+        "count": len(values),
+        "mean": round(statistics.fmean(values), 3),
+        "median": round(statistics.median(values), 3),
+        "p90": _percentile(values, 90),
+        "p95": _percentile(values, 95),
+        "min": round(min(values), 3),
+        "max": round(max(values), 3),
+    }
+
+
+def _percentile(values: list[float], percent: float) -> float:
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, max(0, math.ceil(percent / 100 * len(ordered)) - 1))
+    return round(ordered[index], 3)
 
 
 def _load_dotenv(path: Path) -> None:

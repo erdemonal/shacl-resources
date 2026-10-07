@@ -48,6 +48,7 @@ class ShaclVocabulary:
     core_target_predicates: frozenset[str]
     core_path_predicates: frozenset[str]
     sparql_evidence_predicates: frozenset[str]
+    sparql_constraint_types: frozenset[str]
     excluded_components: frozenset[str]
 
     @property
@@ -63,6 +64,7 @@ class ShaclVocabulary:
             "core_target_predicates": _locals(self.core_target_predicates),
             "core_path_predicates": _locals(self.core_path_predicates),
             "sparql_evidence_predicates": _locals(self.sparql_evidence_predicates),
+            "sparql_constraint_types": _locals(self.sparql_constraint_types),
             "excluded_components": _locals(self.excluded_components),
             "derivation": (
                 "Core constraint parameters are sh:path values of sh:Parameter nodes "
@@ -73,6 +75,10 @@ class ShaclVocabulary:
                 "sh:path is included when the vocabulary gives it rdfs:domain sh:PropertyShape. "
                 "SHACL-SPARQL evidence predicates are sh:sparql plus properties whose "
                 "rdfs:domain is a SPARQL ASK, SELECT, CONSTRUCT, or UPDATE executable. "
+                "sh:select, sh:ask, sh:construct, and sh:update do not verify unless the "
+                "subject is the object of sh:sparql or is typed as sh:SPARQLConstraint "
+                "or a subclass of it. A node typed only as sh:SPARQLExecutable or "
+                "sh:SPARQLSelectExecutable is a query document, not a shape constraint. "
                 "sh:sparql, sh:select, and sh:ask are not SHACL Core constraints."
             ),
         }
@@ -92,6 +98,7 @@ def load_vocabulary(path: Path | None = None) -> ShaclVocabulary:
         core_target_predicates=frozenset(_core_targets(graph)),
         core_path_predicates=frozenset(_property_shape_path(graph)),
         sparql_evidence_predicates=frozenset(_sparql_evidence_predicates(graph, excluded)),
+        sparql_constraint_types=frozenset(_sparql_constraint_types(graph)),
         excluded_components=frozenset(excluded),
     )
 
@@ -156,6 +163,28 @@ def _sparql_evidence_predicates(graph: Graph, excluded: set[str]) -> set[str]:
         if domain is not None and str(domain) in _SPARQL_QUERY_CLASSES:
             predicates.add(str(prop))
     return predicates
+
+
+def _sparql_constraint_types(graph: Graph) -> set[str]:
+    """sh:SPARQLConstraint and classes declared as its subclasses.
+
+    sh:SPARQLExecutable and sh:SPARQLSelectExecutable describe query documents.
+    Those types alone do not make a sh:select triple into shape evidence.
+    """
+    seeds = {SH + "SPARQLConstraint"}
+    parents: dict[str, set[str]] = {}
+    for subject, parent in graph.subject_objects(RDFS.subClassOf):
+        if isinstance(subject, URIRef) and isinstance(parent, URIRef) and str(subject).startswith(SH):
+            parents.setdefault(str(subject), set()).add(str(parent))
+    found = set(seeds)
+    changed = True
+    while changed:
+        changed = False
+        for child, supers in parents.items():
+            if child not in found and supers & found:
+                found.add(child)
+                changed = True
+    return found
 
 
 def _locals(iris: frozenset[str]) -> list[str]:
