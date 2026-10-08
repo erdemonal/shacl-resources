@@ -162,6 +162,12 @@ class GitHubClient:
                     partial.unlink(missing_ok=True)
                     response.close()
                     raise
+                except requests.RequestException as exc:
+                    partial.unlink(missing_ok=True)
+                    response.close()
+                    last_error = exc
+                    time.sleep(min(2 ** attempt, 30))
+                    continue
                 partial.replace(cache)
                 response.close()
                 self.network_bytes["codeload"] = self.network_bytes.get("codeload", 0) + total
@@ -291,7 +297,12 @@ class GitHubClient:
             self.network_requests[slot] = self.network_requests.get(slot, 0) + 1
             self._record_slot(slot, response)
             if response.status_code == 200:
-                payload = response.content
+                try:
+                    payload = response.content
+                except requests.RequestException as exc:
+                    last_error = exc
+                    time.sleep(min(2 ** attempt, 30))
+                    continue
                 self.network_bytes[slot] = self.network_bytes.get(slot, 0) + len(payload)
                 self._write_byte_cache(url, payload)
                 return payload
@@ -347,6 +358,10 @@ class GitHubClient:
                     last_error = GitHubRequestError(response.status_code, _error_message(response))
                     continue
                 raise GitHubRequestError(response.status_code, _error_message(response))
+            except requests.RequestException as exc:
+                last_error = exc
+                time.sleep(min(2 ** attempt, 30))
+                continue
             finally:
                 response.close()
         if isinstance(last_error, GitHubRequestError):
