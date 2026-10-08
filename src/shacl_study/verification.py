@@ -180,6 +180,7 @@ class Inspection:
     seconds_parse: float = 0.0
     stopped_early: bool = False
     tarball_skipped: str = ""
+    tarball_skip_kind: str = ""
 
 
 def load_verification_config(path: Path) -> dict:
@@ -765,6 +766,15 @@ def run_verification(
                 "verification_config_sha256": config_digest,
                 "vocabulary_sha256": vocab.sha256,
                 "tree_reuse": "exact tree SHA only; transient_failure and inaccessible are not reused",
+                "tarball_download_policy": {
+                    "max_attempts": 2,
+                    "attempt_timeout_seconds": 900,
+                    "on_failure": (
+                        "Delete the partial file and fall back to bounded raw-file inspection. "
+                        "A failed tarball is not a scientific negative."
+                    ),
+                    "scientific_rules_unchanged": True,
+                },
             },
         )
     repository_rows: list[dict] = []
@@ -1120,9 +1130,11 @@ def _use_tarball(inspection: Inspection, row: dict, source, config: dict) -> boo
         inspection.seconds_download += time.perf_counter() - started
     except ArchiveTooLarge as exc:
         inspection.tarball_skipped = str(exc)
+        inspection.tarball_skip_kind = "tarball_over_size_cap"
         return False
     except ClassifiedFailure as exc:
         inspection.tarball_skipped = exc.detail
+        inspection.tarball_skip_kind = "tarball_attempt_timeout"
         return False
     inspection.content_source = "codeload_tarball"
     inspection.files = []
@@ -1280,7 +1292,14 @@ def _decide(row: dict, inspection: Inspection, *, prefilter_gate: bool, timestam
         )
     if inspection.tarball_skipped:
         failures.append(
-            _failure(row, inspection.commit_sha, "", "tarball_over_size_cap", None, inspection.tarball_skipped)
+            _failure(
+                row,
+                inspection.commit_sha,
+                "",
+                inspection.tarball_skip_kind or "tarball_over_size_cap",
+                None,
+                inspection.tarball_skipped,
+            )
         )
     if inspection.tarball_failure is not None:
         kind = "transient_failure" if inspection.tarball_failure.kind == "transient" else "inaccessible"

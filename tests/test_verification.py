@@ -1,6 +1,7 @@
 import csv
 import io
 import tarfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -271,6 +272,56 @@ def test_large_tier1_set_uses_one_tarball():
     assert repository["content_source"] == "codeload_tarball"
     assert ("tarball", "a" * 40) in source.calls
     assert not any(call[0] == "file" for call in source.calls)
+
+
+def test_tarball_timeout_falls_back_to_raw_files_without_blocking():
+    repository, _, failures, source = _inspect(
+        {"a.ttl": NODE, "b.ttl": PLAIN, "c.ttl": PLAIN},
+        tarball=ClassifiedFailure("transient", 0, "tarball attempt timed out"),
+        config_updates={"tarball_candidate_threshold": 2},
+    )
+    assert repository["verification_status"] == "verified_shacl"
+    assert repository["content_source"] == "git_tree"
+    assert any(item["failure_kind"] == "tarball_attempt_timeout" for item in failures)
+    assert any(call[0] == "file" for call in source.calls)
+    assert ("tarball", "a" * 40) in source.calls
+
+
+def test_tarball_attempt_stops_after_two_timeouts_and_drops_the_partial(tmp_path):
+    from shacl_study.github_client import GitHubClient, GitHubRequestError
+
+    class _SlowResponse:
+        status_code = 200
+        headers: dict[str, str] = {}
+
+        def iter_content(self, _chunk_size):
+            while True:
+                time.sleep(0.02)
+                yield b"x" * 1024
+
+        def close(self):
+            return None
+
+    class _Session:
+        headers = {"Authorization": "Bearer token"}
+
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, *_args, **_kwargs):
+            self.calls += 1
+            return _SlowResponse()
+
+    client = GitHubClient("token", tmp_path)
+    client.session = _Session()
+    try:
+        client.download_tarball("acme/shapes", "a" * 40, max_bytes=10**9, attempt_timeout_s=0.05)
+    except GitHubRequestError as exc:
+        assert "timed out" in str(exc).lower() or "Request failed" in str(exc)
+    else:
+        raise AssertionError("A timed-out tarball must not return a cache path.")
+    assert client.session.calls == 2
+    assert not list(tmp_path.rglob("*.partial"))
 
 
 def test_oversized_tarball_falls_back_to_selective_files():

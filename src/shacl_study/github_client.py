@@ -45,6 +45,17 @@ class ArchiveTooLarge(RuntimeError):
         self.size = size
 
 
+class TarballAttemptTimeout(RuntimeError):
+    def __init__(self, seconds: float):
+        super().__init__(f"Tarball attempt exceeded {seconds:.0f} seconds.")
+        self.seconds = seconds
+
+
+# Operational transport limit. A saved verification decision is not recomputed.
+TARBALL_MAX_ATTEMPTS = 2
+TARBALL_ATTEMPT_TIMEOUT_S = 15 * 60
+
+
 class GitHubClient:
     def __init__(self, token: str, cache_dir: Path, *, timeout: float = 30.0):
         if not token.strip():
@@ -121,7 +132,15 @@ class GitHubClient:
             return cached[:max_bytes], False
         return self._request_prefix(url, max_bytes=max_bytes, slot="raw")
 
-    def download_tarball(self, full_name: str, commit_sha: str, *, max_bytes: int) -> Path:
+    def download_tarball(
+        self,
+        full_name: str,
+        commit_sha: str,
+        *,
+        max_bytes: int,
+        max_attempts: int = TARBALL_MAX_ATTEMPTS,
+        attempt_timeout_s: float = TARBALL_ATTEMPT_TIMEOUT_S,
+    ) -> Path:
         url = tarball_url(full_name, commit_sha)
         cache = self._byte_cache_path(url)
         if cache.exists():
@@ -132,7 +151,7 @@ class GitHubClient:
         cache.parent.mkdir(parents=True, exist_ok=True)
         partial = cache.with_suffix(".partial")
         last_error: Exception | None = None
-        for attempt in range(4):
+        for attempt in range(max_attempts):
             self._wait_slot("codeload")
             try:
                 response = self.session.get(
@@ -142,16 +161,20 @@ class GitHubClient:
                     stream=True,
                 )
             except requests.RequestException as exc:
+                partial.unlink(missing_ok=True)
                 last_error = exc
-                time.sleep(min(2 ** attempt, 30))
+                self._pause_before_tarball_retry(attempt, attempt_timeout_s)
                 continue
             self.network_requests["codeload"] = self.network_requests.get("codeload", 0) + 1
             self._record_slot("codeload", response)
             if response.status_code == 200:
                 total = 0
+                started = time.monotonic()
                 try:
                     with partial.open("wb") as handle:
                         for chunk in response.iter_content(1024 * 1024):
+                            if time.monotonic() - started >= attempt_timeout_s:
+                                raise TarballAttemptTimeout(attempt_timeout_s)
                             if not chunk:
                                 continue
                             total += len(chunk)
@@ -162,11 +185,11 @@ class GitHubClient:
                     partial.unlink(missing_ok=True)
                     response.close()
                     raise
-                except requests.RequestException as exc:
+                except (requests.RequestException, TarballAttemptTimeout) as exc:
                     partial.unlink(missing_ok=True)
                     response.close()
                     last_error = exc
-                    time.sleep(min(2 ** attempt, 30))
+                    self._pause_before_tarball_retry(attempt, attempt_timeout_s)
                     continue
                 partial.replace(cache)
                 response.close()
@@ -176,17 +199,23 @@ class GitHubClient:
             if response.status_code == 401:
                 raise GitHubAuthError(_error_message(response))
             if response.status_code in {403, 429} and _is_rate_limit(response):
-                time.sleep(_retry_delay(response, attempt))
                 last_error = GitHubRequestError(response.status_code, _error_message(response))
+                self._pause_before_tarball_retry(attempt, attempt_timeout_s)
                 continue
             if response.status_code in {502, 503, 504}:
-                time.sleep(min(2 ** attempt, 30))
                 last_error = GitHubRequestError(response.status_code, _error_message(response))
+                self._pause_before_tarball_retry(attempt, attempt_timeout_s)
                 continue
             raise GitHubRequestError(response.status_code, _error_message(response))
         if isinstance(last_error, GitHubRequestError):
             raise last_error
         raise GitHubRequestError(0, f"Request failed: {last_error}")
+
+    @staticmethod
+    def _pause_before_tarball_retry(attempt: int, attempt_timeout_s: float) -> None:
+        if attempt_timeout_s < 60:
+            return
+        time.sleep(min(2 ** attempt, 30))
 
     def _request(
         self,
