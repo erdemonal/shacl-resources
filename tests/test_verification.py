@@ -307,8 +307,8 @@ def test_prefilter_miss_is_not_absence():
         row=_row(discovered_by="repository:broad_text"),
     )
     assert repository["verification_status"] == "not_verified"
-    assert repository["verification_reason"] == "prefilter_no_shacl_signal"
-    assert repository["inspection_complete"] is False
+    assert repository["verification_reason"] == "prefilter_no_canonical_shacl_signal"
+    assert repository["inspection_complete"] is True
     assert files[0]["parse_status"] == "not_parsed"
     assert "no_shacl" not in repository["verification_status"]
 
@@ -643,3 +643,204 @@ def test_failure_class_separates_not_found_from_rate_limit():
     assert failure_class(403, "HTTP 403: rate limit exceeded") == "transient"
     assert failure_class(403, "HTTP 403: Resource not accessible") == "inaccessible"
     assert failure_class(0, "timed out") == "transient"
+
+
+def test_identical_tree_sha_reuses_one_content_inspection(tmp_path):
+    source = _PinnedSource(
+        {"shape.ttl": NODE},
+        {
+            "acme/shapes": {"commit_sha": "1" * 40, "tree_sha": "c" * 40},
+            "forks/shapes": {"commit_sha": "2" * 40, "tree_sha": "c" * 40},
+        },
+    )
+    summary = run_verification(
+        rows=[
+            _row(repository_id="1", repository_full_name="acme/shapes", verification_phase="2"),
+            _row(
+                repository_id="2",
+                repository_full_name="forks/shapes",
+                is_fork="true",
+                verification_phase="2",
+            ),
+        ],
+        source=source,
+        vocab=default_vocabulary(),
+        config=dict(CONFIG),
+        config_digest="abc",
+        data_dir=tmp_path,
+        fresh=True,
+        clock=CLOCK,
+        logger=_logger(),
+        phase="2",
+    )
+    rows = list(csv.DictReader((tmp_path / "results" / "repository_verification.csv").open()))
+    donor, reused = rows
+    assert summary["status_counts"]["verified_shacl"] == 2
+    assert donor["verification_reused"] == "false"
+    assert reused["verification_reused"] == "true"
+    assert reused["verification_reused_from_repository"] == "acme/shapes"
+    assert reused["reused_tree_sha"] == "c" * 40
+    assert reused["commit_sha_examined"] == "2" * 40
+    assert reused["repository_id"] == "2"
+    assert reused["is_fork"] == "true"
+    assert reused["node_shape_count"] == donor["node_shape_count"]
+    assert sum(1 for call in source.calls if call[0] == "tree") == 1
+    assert sum(1 for call in source.calls if call[0] == "file") == 1
+
+
+def test_different_tree_sha_is_not_reused_for_the_same_repository_name(tmp_path):
+    source = _PinnedSource(
+        {"shape.ttl": NODE},
+        {
+            "one/semantica": {"commit_sha": "1" * 40, "tree_sha": "a" * 40},
+            "two/semantica": {"commit_sha": "2" * 40, "tree_sha": "b" * 40},
+        },
+    )
+    run_verification(
+        rows=[
+            _row(repository_id="1", repository_full_name="one/semantica", discovered_by="repository:broad_text"),
+            _row(repository_id="2", repository_full_name="two/semantica", discovered_by="repository:broad_text"),
+        ],
+        source=source,
+        vocab=default_vocabulary(),
+        config=dict(CONFIG),
+        config_digest="abc",
+        data_dir=tmp_path,
+        fresh=True,
+        clock=CLOCK,
+        logger=_logger(),
+        phase="2",
+    )
+    rows = list(csv.DictReader((tmp_path / "results" / "repository_verification.csv").open()))
+    assert [row["verification_reused"] for row in rows] == ["false", "false"]
+    assert sum(1 for call in source.calls if call[0] == "tree") == 2
+
+
+def test_transient_failure_is_not_reused_for_the_same_tree(tmp_path):
+    source = _PinnedSource(
+        {"shape.ttl": NODE},
+        {
+            "acme/shapes": {"commit_sha": "1" * 40, "tree_sha": "c" * 40},
+            "forks/shapes": {"commit_sha": "2" * 40, "tree_sha": "c" * 40},
+        },
+        fail_trees=1,
+    )
+    run_verification(
+        rows=[
+            _row(repository_id="1", repository_full_name="acme/shapes"),
+            _row(repository_id="2", repository_full_name="forks/shapes", is_fork="true"),
+        ],
+        source=source,
+        vocab=default_vocabulary(),
+        config=dict(CONFIG),
+        config_digest="abc",
+        data_dir=tmp_path,
+        fresh=True,
+        clock=CLOCK,
+        logger=_logger(),
+        phase="2",
+    )
+    rows = list(csv.DictReader((tmp_path / "results" / "repository_verification.csv").open()))
+    assert rows[0]["verification_status"] == "transient_failure"
+    assert rows[1]["verification_status"] == "verified_shacl"
+    assert rows[1]["verification_reused"] == "false"
+    assert sum(1 for call in source.calls if call[0] == "tree") == 2
+
+
+def test_tree_identity_report_collapses_only_exact_tree_shas():
+    from shacl_study.verification import tree_identity_report
+
+    rows = [
+        _row(repository_id="1", repository_full_name="a/semantica", is_fork="true"),
+        _row(repository_id="2", repository_full_name="b/semantica", is_fork="true"),
+        _row(repository_id="3", repository_full_name="c/other", is_fork="true"),
+        _row(repository_id="4", repository_full_name="d/missing", is_fork="false"),
+    ]
+    for row in rows:
+        row["discovered_by"] = "repository:broad_text"
+    pins = {
+        "1": {"status": "resolved", "tree_sha": "same"},
+        "2": {"status": "resolved", "tree_sha": "same"},
+        "3": {"status": "resolved", "tree_sha": "other"},
+        "4": {"status": "inaccessible", "tree_sha": ""},
+    }
+    report = tree_identity_report(rows, pins)
+    assert report["phase2_repositories"] == 4
+    assert report["tree_sha_resolved"] == 3
+    assert report["unique_tree_shas"] == 2
+    assert report["content_inspections_avoided"] == 1
+    assert report["repositories_sharing_a_tree"] == 2
+    assert report["semantica_family_repositories"] == 2
+    assert report["semantica_family_unique_tree_shas"] == 1
+    assert report["semantica_family_inspections_avoided"] == 1
+    assert report["unresolved"] == {"inaccessible": 1}
+
+
+class _PinnedSource(MemorySource):
+    def __init__(self, files, pins, *, fail_trees: int = 0):
+        super().__init__(files)
+        self.pins = pins
+        self.fail_trees = fail_trees
+
+    def resolve_commit(self, full_name, branch):
+        self.calls.append(("commit", full_name))
+        return self.pins[full_name]
+
+    def get_tree(self, full_name, tree_sha):
+        if self.fail_trees:
+            self.fail_trees -= 1
+            self.calls.append(("tree", tree_sha))
+            raise ClassifiedFailure("transient", 503, "unavailable")
+        return super().get_tree(full_name, tree_sha)
+
+
+def test_prefilter_parses_only_the_file_with_a_canonical_signal():
+    repository, files, _, _ = _inspect(
+        {"plain.ttl": PLAIN, "shape.ttl": NODE},
+        row=_row(discovered_by="repository:broad_text", verification_phase="2"),
+    )
+    by_path = {item["path"]: item for item in files}
+    assert by_path["plain.ttl"]["parse_status"] == "not_parsed"
+    assert by_path["shape.ttl"]["parse_status"] == "parsed"
+    assert repository["verification_status"] == "verified_shacl"
+    assert repository["verification_phase"] == "2"
+    assert repository["inspection_complete"] is True
+
+
+def test_phase2_pilot_keeps_only_repositories_without_code_search():
+    from shacl_study.verification import select_phase2, select_phase2_pilot
+
+    rows = []
+    for index in range(30):
+        rows.append(_cohort_row(index, "repository:broad_text"))
+    for index in range(30, 60):
+        rows.append(_cohort_row(index, "repository:broad_text", fork="true"))
+    for index in range(60, 90):
+        rows.append(_cohort_row(index, "repository:repository_topic|repository:broad_text"))
+    for index in range(90, 110):
+        rows.append(_cohort_row(index, "repository:broad_text", archived="true"))
+    for index in range(110, 120):
+        rows.append(_cohort_row(index, "code:shacl_term:primary"))
+    assert len(select_phase2(rows)) == 110
+    pilot = select_phase2_pilot(rows, 100)
+    counts: dict[str, int] = {}
+    for row in pilot:
+        counts[row["pilot_stratum"]] = counts.get(row["pilot_stratum"], 0) + 1
+        assert "code:" not in row["discovered_by"]
+        assert row["verification_phase"] == "2"
+    assert counts == {
+        "broad_non_fork": 25,
+        "broad_fork": 25,
+        "topic_only": 25,
+        "archived": 20,
+    }
+
+
+def _cohort_row(index: int, discovered_by: str, *, fork: str = "false", archived: str = "false") -> dict:
+    return {
+        "repository_id": str(index),
+        "repository_full_name": f"o/r{index}",
+        "discovered_by": discovered_by,
+        "is_fork": fork,
+        "archived": archived,
+    }

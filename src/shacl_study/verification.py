@@ -88,7 +88,15 @@ REPO_COLUMNS = [
     "network_raw_requests",
     "network_tarballs",
     "network_bytes",
+    "verification_phase",
+    "reused_tree_sha",
+    "verification_reused",
+    "verification_reused_from_repository",
 ]
+# Bump this when the verification procedure changes without a config or vocabulary change.
+VERIFICATION_IMPLEMENTATION = "phase2-tree-identity-1"
+CANONICAL_NAMESPACE = "http://www.w3.org/ns/shacl#"
+NONREUSABLE_STATUSES = {"transient_failure", "inaccessible"}
 FILE_COLUMNS = [
     "repository_id",
     "repository_full_name",
@@ -269,6 +277,76 @@ def select_pilot(rows: list[dict], size: int = 50) -> list[dict]:
     return selected
 
 
+PHASE2_STRATA = (
+    ("broad_non_fork", 25),
+    ("broad_fork", 25),
+    ("topic_only", 25),
+    ("archived", 25),
+)
+
+
+def select_phase2(rows: list[dict]) -> list[dict]:
+    """Repositories with no code-search signal. A miss there is not a negative finding."""
+    selected = []
+    for row in rows:
+        if has_code_signal(row.get("discovered_by", "")):
+            continue
+        picked = dict(row)
+        picked["verification_phase"] = "2"
+        selected.append(picked)
+    return selected
+
+
+def select_phase2_pilot(rows: list[dict], size: int = 100) -> list[dict]:
+    """Stratified Phase 2 sample: broad non-forks, broad forks, topic-only, archived."""
+    pool = select_phase2(rows)
+    quotas = _equal_quotas(size, len(PHASE2_STRATA))
+    predicates = {
+        "archived": lambda row: _flag(row, "archived"),
+        "topic_only": lambda row: _topic_only(row) and not _flag(row, "archived"),
+        "broad_non_fork": lambda row: evidence_families(row["discovered_by"]) == {"repository_broad_text"}
+        and not _flag(row, "is_fork")
+        and not _flag(row, "archived"),
+        "broad_fork": lambda row: evidence_families(row["discovered_by"]) == {"repository_broad_text"}
+        and _flag(row, "is_fork")
+        and not _flag(row, "archived"),
+    }
+    selected: list[dict] = []
+    used: set[str] = set()
+    for (name, _), quota in zip(PHASE2_STRATA, quotas, strict=True):
+        stratum = [row for row in pool if row["repository_id"] not in used and predicates[name](row)]
+        for row in _spaced(stratum, quota):
+            used.add(row["repository_id"])
+            picked = dict(row)
+            picked["pilot_stratum"] = name
+            picked["verification_phase"] = "2"
+            selected.append(picked)
+    return selected
+
+
+def phase2_stratum(row: dict) -> str:
+    """Disjoint Phase 2 stratum. Archived wins over topic and broad metadata."""
+    if _flag(row, "archived"):
+        return "archived"
+    if _topic_only(row):
+        return "topic_only"
+    families = evidence_families(row.get("discovered_by", ""))
+    if families == {"repository_broad_text"} and _flag(row, "is_fork"):
+        return "broad_fork"
+    if families == {"repository_broad_text"}:
+        return "broad_non_fork"
+    return "other"
+
+
+def semantica_family(row: dict) -> bool:
+    return row.get("repository_full_name", "").rsplit("/", 1)[-1].lower() == "semantica"
+
+
+def _equal_quotas(size: int, parts: int) -> list[int]:
+    base, remainder = divmod(size, parts)
+    return [base + (1 if index < remainder else 0) for index in range(parts)]
+
+
 def select_benchmark(
     rows: list[dict],
     count: int,
@@ -312,6 +390,7 @@ def inspect_repository(
     config: dict,
     clock,
     hit_paths: list[str] | None = None,
+    resolved_pin: dict | None = None,
 ) -> tuple[dict, list[dict], list[dict]]:
     timestamp = clock().strftime("%Y-%m-%dT%H:%M:%SZ")
     prefilter_gate = not has_code_signal(row.get("discovered_by", ""))
@@ -324,18 +403,19 @@ def inspect_repository(
             paths,
             source=source,
             config=config,
+            resolved_pin=resolved_pin,
         )
         if stop:
             inspection = hit_inspection
         else:
-            inspection = _collect(row, source=source, config=config)
+            inspection = _collect(row, source=source, config=config, resolved_pin=resolved_pin)
             inspection.seconds_commit += hit_inspection.seconds_commit
             inspection.seconds_download += hit_inspection.seconds_download
             inspection.seconds_parse += hit_inspection.seconds_parse
             inspection.discovery_hit_files = hit_inspection.discovery_hit_files
             inspection.verification_pass = "tree_inspection"
     if inspection is None:
-        inspection = _collect(row, source=source, config=config)
+        inspection = _collect(row, source=source, config=config, resolved_pin=resolved_pin)
         inspection.verification_pass = "tree_inspection"
     repository_row, failures = _decide(
         row,
@@ -366,7 +446,14 @@ def _hit_rank(path: str) -> int:
     return 2
 
 
-def _discovery_hit_pass(row: dict, paths: list[str], *, source, config: dict) -> tuple[Inspection, bool]:
+def _discovery_hit_pass(
+    row: dict,
+    paths: list[str],
+    *,
+    source,
+    config: dict,
+    resolved_pin: dict | None = None,
+) -> tuple[Inspection, bool]:
     """Return (inspection, stop). Stop is false when the hits do not establish SHACL.
 
     A false stop flag is not a negative finding. The caller inspects the tree.
@@ -380,19 +467,20 @@ def _discovery_hit_pass(row: dict, paths: list[str], *, source, config: dict) ->
         inspection.access_detail = "Candidate row has no default branch."
         inspection.verification_pass = "access_failure"
         return inspection, True
-    try:
-        started = time.perf_counter()
-        pin = source.resolve_commit(full_name, branch)
-        inspection.seconds_commit += time.perf_counter() - started
-    except ClassifiedFailure as exc:
-        inspection.access_kind = exc.kind
-        inspection.access_reason = f"commit_{exc.kind}"
-        inspection.access_status = exc.status
-        inspection.access_detail = exc.detail
-        inspection.verification_pass = "access_failure"
-        return inspection, True
-    inspection.commit_sha = pin["commit_sha"]
-    inspection.tree_sha = pin["tree_sha"]
+    if resolved_pin is None:
+        try:
+            started = time.perf_counter()
+            resolved_pin = source.resolve_commit(full_name, branch)
+            inspection.seconds_commit += time.perf_counter() - started
+        except ClassifiedFailure as exc:
+            inspection.access_kind = exc.kind
+            inspection.access_reason = f"commit_{exc.kind}"
+            inspection.access_status = exc.status
+            inspection.access_detail = exc.detail
+            inspection.verification_pass = "access_failure"
+            return inspection, True
+    inspection.commit_sha = resolved_pin["commit_sha"]
+    inspection.tree_sha = resolved_pin["tree_sha"]
     needles = _needles(config)
     for path in paths:
         result = FileResult(path=path, candidate_rule=raw_extension_rule(path, config))
@@ -503,6 +591,117 @@ class GitHubContent:
         return tarball_entries(archive, self.config)
 
 
+def _resolve_pin(row: dict, source) -> tuple[dict | None, float]:
+    branch = row.get("default_branch") or ""
+    if not branch:
+        return None, 0.0
+    started = time.perf_counter()
+    try:
+        pin = source.resolve_commit(row["repository_full_name"], branch)
+    except ClassifiedFailure:
+        return None, time.perf_counter() - started
+    return pin, time.perf_counter() - started
+
+
+def _tree_entry_current(entry: dict, *, config_digest: str, vocab_sha: str) -> bool:
+    repository = entry.get("repository") or {}
+    return (
+        entry.get("implementation") == VERIFICATION_IMPLEMENTATION
+        and entry.get("config_sha256") == config_digest
+        and entry.get("canonical_namespace") == CANONICAL_NAMESPACE
+        and entry.get("vocab_sha256") == vocab_sha
+        and repository.get("verification_status") not in NONREUSABLE_STATUSES
+        and bool(repository.get("tree_sha"))
+    )
+
+
+def _reusable_tree_entry(state: dict, pin: dict | None, *, config_digest: str, vocab_sha: str) -> dict | None:
+    if not pin or not pin.get("tree_sha"):
+        return None
+    entry = state.setdefault("trees", {}).get(pin["tree_sha"])
+    if entry and _tree_entry_current(entry, config_digest=config_digest, vocab_sha=vocab_sha):
+        return entry
+    return None
+
+
+def _remember_tree(
+    state: dict,
+    repository: dict,
+    files: list[dict],
+    failures: list[dict],
+    *,
+    config_digest: str,
+    vocab_sha: str,
+) -> None:
+    """Index a finished content inspection by exact Git tree SHA.
+
+    Same name, parent, or fork family is not identity. Transient and inaccessible
+    results are not scientific content decisions and are not stored.
+    """
+    if repository.get("verification_reused"):
+        return
+    tree_sha = repository.get("tree_sha") or ""
+    if not tree_sha or repository.get("verification_status") in NONREUSABLE_STATUSES:
+        return
+    state.setdefault("trees", {})[tree_sha] = {
+        "implementation": VERIFICATION_IMPLEMENTATION,
+        "config_sha256": config_digest,
+        "canonical_namespace": CANONICAL_NAMESPACE,
+        "vocab_sha256": vocab_sha,
+        "source_repository_id": repository["repository_id"],
+        "source_repository_full_name": repository["repository_full_name"],
+        "repository": repository,
+        "files": files,
+        "failures": failures,
+    }
+
+
+def _reuse_repository(
+    row: dict,
+    pin: dict,
+    entry: dict,
+    *,
+    timestamp: str,
+    seconds_commit: float,
+) -> tuple[dict, list[dict], list[dict]]:
+    repository = dict(entry["repository"])
+    repository.update(
+        {
+            "repository_id": row["repository_id"],
+            "repository_full_name": row["repository_full_name"],
+            "commit_sha_examined": pin["commit_sha"],
+            "default_branch": row.get("default_branch", ""),
+            "tree_sha": pin["tree_sha"],
+            "inspection_timestamp": timestamp,
+            "pilot_stratum": row.get("pilot_stratum", ""),
+            "is_fork": row.get("is_fork", ""),
+            "archived": row.get("archived", ""),
+            "verification_phase": row.get("verification_phase", repository.get("verification_phase", "")),
+            "seconds_commit": f"{seconds_commit:.3f}",
+            "seconds_tree": "0.000",
+            "seconds_download": "0.000",
+            "seconds_parse": "0.000",
+            "network_raw_requests": 0,
+            "network_tarballs": 0,
+            "network_bytes": 0,
+            "reused_tree_sha": pin["tree_sha"],
+            "verification_reused": True,
+            "verification_reused_from_repository": entry["source_repository_full_name"],
+        }
+    )
+    files = [_copy_identity(item, row, pin["commit_sha"]) for item in entry["files"]]
+    failures = [_copy_identity(item, row, pin["commit_sha"]) for item in entry["failures"]]
+    return repository, files, failures
+
+
+def _copy_identity(item: dict, row: dict, commit_sha: str) -> dict:
+    copied = dict(item)
+    copied["repository_id"] = row["repository_id"]
+    copied["repository_full_name"] = row["repository_full_name"]
+    copied["commit_sha_examined"] = commit_sha
+    return copied
+
+
 def run_verification(
     *,
     rows: list[dict],
@@ -524,8 +723,11 @@ def run_verification(
     vocab = vocab or default_vocabulary()
     state_path = state_path or (data_dir / "candidates" / "verification_state.json")
     state = _load_state(state_path, config_digest, vocab.sha256, fresh)
-    if hit_index is None:
+    if phase == "2":
+        hit_index = {}
+    elif hit_index is None:
         hit_index = load_code_search_paths(data_dir / "raw" / "github-cache")
+    results = results_dir or (data_dir / "results")
     if phase == "1":
         _write_phase_manifest(
             data_dir / "results" / "phase1_manifest.json",
@@ -543,6 +745,28 @@ def run_verification(
                 "vocabulary_sha256": vocab.sha256,
             },
         )
+    if phase == "2":
+        _write_phase_manifest(
+            results / "phase2_manifest.json",
+            {
+                "milestone": 2,
+                "phase": 2,
+                "scope": (
+                    "Repositories with no code-search signal. "
+                    "Exact Git tree SHA reuse does not merge repository rows."
+                ),
+                "started_at": clock().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "git_commit": git_commit,
+                "git_dirty": git_dirty,
+                "repository_count": len(rows),
+                "canonical_namespace": CANONICAL_NAMESPACE,
+                "noncanonical_namespace": "https://www.w3.org/ns/shacl#",
+                "verification_implementation": VERIFICATION_IMPLEMENTATION,
+                "verification_config_sha256": config_digest,
+                "vocabulary_sha256": vocab.sha256,
+                "tree_reuse": "exact tree SHA only; transient_failure and inaccessible are not reused",
+            },
+        )
     repository_rows: list[dict] = []
     file_rows: list[dict] = []
     failure_rows: list[dict] = []
@@ -550,10 +774,20 @@ def run_verification(
         key = str(row["repository_id"])
         cached = state["repositories"].get(key)
         if cached and cached.get("verification_status") != "transient_failure":
+            _remember_tree(
+                state,
+                cached["repository"],
+                cached["files"],
+                cached["failures"],
+                config_digest=config_digest,
+                vocab_sha=vocab.sha256,
+            )
             repository_rows.append(cached["repository"])
             file_rows.extend(cached["files"])
             failure_rows.extend(cached["failures"])
             continue
+        if phase and not row.get("verification_phase"):
+            row["verification_phase"] = phase
         logger.info(
             "verify %s/%s %s stratum=%s",
             index,
@@ -564,14 +798,34 @@ def run_verification(
         client = getattr(source, "client", None)
         requests_before = dict(getattr(client, "network_requests", {}) or {})
         bytes_before = dict(getattr(client, "network_bytes", {}) or {})
-        repository, files, failures = inspect_repository(
-            row,
-            source=source,
-            vocab=vocab,
-            config=config,
-            clock=clock,
-            hit_paths=hit_index.get(key, []),
-        )
+        resolved_pin, pin_seconds = _resolve_pin(row, source)
+        entry = _reusable_tree_entry(state, resolved_pin, config_digest=config_digest, vocab_sha=vocab.sha256)
+        if entry is not None:
+            repository, files, failures = _reuse_repository(
+                row,
+                resolved_pin,
+                entry,
+                timestamp=clock().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                seconds_commit=pin_seconds,
+            )
+        else:
+            repository, files, failures = inspect_repository(
+                row,
+                source=source,
+                vocab=vocab,
+                config=config,
+                clock=clock,
+                hit_paths=hit_index.get(key, []),
+                resolved_pin=resolved_pin,
+            )
+            _remember_tree(
+                state,
+                repository,
+                files,
+                failures,
+                config_digest=config_digest,
+                vocab_sha=vocab.sha256,
+            )
         requests_after = dict(getattr(client, "network_requests", {}) or {})
         bytes_after = dict(getattr(client, "network_bytes", {}) or {})
         repository["network_raw_requests"] = requests_after.get("raw", 0) - requests_before.get("raw", 0)
@@ -586,12 +840,12 @@ def run_verification(
         file_rows.extend(files)
         failure_rows.extend(failures)
         logger.info(
-            "status %s %s complete=%s",
+            "status %s %s complete=%s reused=%s",
             row["repository_full_name"],
             repository["verification_status"],
             repository["inspection_complete"],
+            repository.get("verification_reused", False),
         )
-    results = results_dir or (data_dir / "results")
     write_csv(results / "repository_verification.csv", REPO_COLUMNS, repository_rows)
     write_csv(results / "shacl_file_verification.csv", FILE_COLUMNS, file_rows)
     write_csv(results / "milestone2_failures.csv", FAILURE_COLUMNS, failure_rows)
@@ -612,29 +866,178 @@ def run_verification(
         finished = dict(summary)
         finished["finished_at"] = clock().strftime("%Y-%m-%dT%H:%M:%SZ")
         _write_phase_manifest(results / "phase1_manifest.json", finished)
+    if phase == "2":
+        finished = dict(summary)
+        finished["finished_at"] = clock().strftime("%Y-%m-%dT%H:%M:%SZ")
+        finished["tree_reuse_observed"] = {
+            "unique_trees_inspected": len(state.get("trees", {})),
+            "repositories_reused": sum(1 for row in repository_rows if row.get("verification_reused") is True),
+        }
+        _write_phase_manifest(results / "phase2_manifest.json", finished)
     _write_state(state_path, state)
     return summary
 
 
-def _collect(row: dict, *, source, config: dict) -> Inspection:
+def resolve_tree_census(
+    rows: list[dict],
+    *,
+    source,
+    state_path: Path,
+    fresh: bool,
+    clock,
+    logger,
+) -> dict:
+    """Resolve pinned commit and tree SHAs. Does not download repository files."""
+    if fresh and state_path.exists():
+        state_path.unlink()
+    if state_path.exists():
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state.setdefault("pins", {})
+    else:
+        state = {"pins": {}}
+    pins: dict = state["pins"]
+    for index, row in enumerate(rows, start=1):
+        key = str(row["repository_id"])
+        saved = pins.get(key)
+        if saved and saved.get("status") != "transient_failure":
+            continue
+        branch = row.get("default_branch") or ""
+        record = {
+            "repository_id": key,
+            "repository_full_name": row["repository_full_name"],
+            "default_branch": branch,
+            "is_fork": row.get("is_fork", ""),
+            "archived": row.get("archived", ""),
+            "stratum": phase2_stratum(row),
+            "semantica_family": semantica_family(row),
+            "resolved_at": clock().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        if not branch:
+            record.update(
+                status="inaccessible",
+                commit_sha="",
+                tree_sha="",
+                detail="missing_default_branch",
+            )
+        else:
+            try:
+                pin = source.resolve_commit(row["repository_full_name"], branch)
+            except ClassifiedFailure as exc:
+                status = "transient_failure" if exc.kind == "transient" else "inaccessible"
+                record.update(status=status, commit_sha="", tree_sha="", detail=exc.detail[:500])
+            else:
+                record.update(
+                    status="resolved",
+                    commit_sha=pin["commit_sha"],
+                    tree_sha=pin["tree_sha"],
+                    detail="",
+                )
+        pins[key] = record
+        if index % 25 == 0:
+            _write_state(state_path, state)
+            logger.info(
+                "tree census %s/%s last=%s status=%s",
+                index,
+                len(rows),
+                row["repository_full_name"],
+                record["status"],
+            )
+    _write_state(state_path, state)
+    return state
+
+
+def tree_identity_report(rows: list[dict], pins: dict) -> dict:
+    """Summarize exact tree-SHA identity. Same names are not treated as identity."""
+    groups: dict[str, list[dict]] = {}
+    unresolved: dict[str, int] = {}
+    resolved = 0
+    for row in rows:
+        pin = pins.get(str(row["repository_id"]))
+        if not pin or pin.get("status") != "resolved" or not pin.get("tree_sha"):
+            label = pin.get("status") if pin else "missing"
+            unresolved[label] = unresolved.get(label, 0) + 1
+            continue
+        resolved += 1
+        groups.setdefault(pin["tree_sha"], []).append(row)
+    unique = len(groups)
+    avoided = resolved - unique
+    shared_groups = [members for members in groups.values() if len(members) > 1]
+    semantica_rows = [row for row in rows if semantica_family(row)]
+    semantica_trees: dict[str, int] = {}
+    semantica_resolved = 0
+    for row in semantica_rows:
+        pin = pins.get(str(row["repository_id"]))
+        if pin and pin.get("status") == "resolved" and pin.get("tree_sha"):
+            semantica_resolved += 1
+            semantica_trees[pin["tree_sha"]] = semantica_trees.get(pin["tree_sha"], 0) + 1
+    unique_by_stratum: dict[str, int] = {}
+    repos_by_stratum: dict[str, int] = {}
+    for members in groups.values():
+        stratum = phase2_stratum(members[0])
+        unique_by_stratum[stratum] = unique_by_stratum.get(stratum, 0) + 1
+        for member in members:
+            label = phase2_stratum(member)
+            repos_by_stratum[label] = repos_by_stratum.get(label, 0) + 1
+    largest = sorted(groups.items(), key=lambda item: len(item[1]), reverse=True)[:15]
+    return {
+        "phase2_repositories": len(rows),
+        "tree_sha_resolved": resolved,
+        "unresolved": unresolved,
+        "unique_tree_shas": unique,
+        "trees_shared_by_multiple_repositories": len(shared_groups),
+        "repositories_sharing_a_tree": sum(len(members) for members in shared_groups),
+        "content_inspections_required": unique,
+        "content_inspections_avoided": avoided,
+        "content_inspections_avoided_percent_of_phase2": round(100 * avoided / len(rows), 2) if rows else 0,
+        "content_inspections_avoided_percent_of_resolved": round(100 * avoided / resolved, 2) if resolved else 0,
+        "resolved_repositories_by_stratum": repos_by_stratum,
+        "unique_trees_by_representative_stratum": unique_by_stratum,
+        "largest_identical_tree_groups": [
+            {
+                "tree_sha": tree_sha,
+                "repositories": len(members),
+                "sample": [member["repository_full_name"] for member in members[:5]],
+                "name_counts": _name_counts(members),
+            }
+            for tree_sha, members in largest
+        ],
+        "semantica_family_repositories": len(semantica_rows),
+        "semantica_family_resolved": semantica_resolved,
+        "semantica_family_unique_tree_shas": len(semantica_trees),
+        "semantica_family_inspections_avoided": semantica_resolved - len(semantica_trees),
+        "semantica_family_largest_tree": max(semantica_trees.values(), default=0),
+    }
+
+
+def _name_counts(members: list[dict]) -> list[list]:
+    counts: dict[str, int] = {}
+    for member in members:
+        name = member["repository_full_name"].rsplit("/", 1)[-1]
+        counts[name] = counts.get(name, 0) + 1
+    return [[name, count] for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:5]]
+
+
+def _collect(row: dict, *, source, config: dict, resolved_pin: dict | None = None) -> Inspection:
     inspection = Inspection()
     branch = row.get("default_branch") or ""
     full_name = row["repository_full_name"]
-    if not branch:
-        inspection.access_kind = "inaccessible"
-        inspection.access_reason = "missing_default_branch"
-        inspection.access_detail = "Candidate row has no default branch."
-        return inspection
-    try:
-        started = time.perf_counter()
-        pin = source.resolve_commit(full_name, branch)
-        inspection.seconds_commit += time.perf_counter() - started
-    except ClassifiedFailure as exc:
-        inspection.access_kind = exc.kind
-        inspection.access_reason = f"commit_{exc.kind}"
-        inspection.access_status = exc.status
-        inspection.access_detail = exc.detail
-        return inspection
+    if resolved_pin is None:
+        if not branch:
+            inspection.access_kind = "inaccessible"
+            inspection.access_reason = "missing_default_branch"
+            inspection.access_detail = "Candidate row has no default branch."
+            return inspection
+        try:
+            started = time.perf_counter()
+            resolved_pin = source.resolve_commit(full_name, branch)
+            inspection.seconds_commit += time.perf_counter() - started
+        except ClassifiedFailure as exc:
+            inspection.access_kind = exc.kind
+            inspection.access_reason = f"commit_{exc.kind}"
+            inspection.access_status = exc.status
+            inspection.access_detail = exc.detail
+            return inspection
+    pin = resolved_pin
     inspection.commit_sha = pin["commit_sha"]
     inspection.tree_sha = pin["tree_sha"]
     try:
@@ -854,6 +1257,10 @@ def _decide(row: dict, inspection: Inspection, *, prefilter_gate: bool, timestam
         "archived": row.get("archived", ""),
         "content_source": inspection.content_source,
         "prefilter_gate": prefilter_gate,
+        "verification_phase": row.get("verification_phase", ""),
+        "reused_tree_sha": "",
+        "verification_reused": False,
+        "verification_reused_from_repository": "",
     }
     failures: list[dict] = []
     if inspection.access_kind:
@@ -924,6 +1331,8 @@ def _parse_when_required(inspection: Inspection, *, prefilter_gate: bool) -> Non
     for result in accepted:
         if result.parse_status != "not_parsed":
             continue
+        if prefilter_gate and not result.text_hit:
+            continue
         parser_format = PARSER_FORMATS.get(result.candidate_rule, "")
         result.parser_format = parser_format
         payload = result.payload
@@ -981,12 +1390,12 @@ def _status(inspection: Inspection, accepted: list[FileResult], *, prefilter_gat
             reason = "sparql_shape_evidence"
         else:
             reason = "core_shape_evidence"
-        return "verified_shacl", reason, operational == "" and _parses_complete(accepted)
+        return "verified_shacl", reason, operational == "" and _parses_complete(accepted, prefilter_gate=prefilter_gate)
     if _noncanonical_terms(accepted):
         return (
             "noncanonical_shacl_namespace",
             "https_shacl_namespace",
-            operational == "" and _parses_complete(accepted),
+            operational == "" and _parses_complete(accepted, prefilter_gate=prefilter_gate),
         )
     if inspection.archive_too_large:
         return "incomplete_inspection", "archive_over_size_cap", False
@@ -997,8 +1406,8 @@ def _status(inspection: Inspection, accepted: list[FileResult], *, prefilter_gat
     if not accepted:
         return "not_verified", "no_candidate_rdf_files", False
     if prefilter_gate and not any(item.text_hit for item in accepted):
-        return "not_verified", "prefilter_no_shacl_signal", False
-    if any(item.parse_status != "parsed" for item in accepted):
+        return "not_verified", "prefilter_no_canonical_shacl_signal", True
+    if any(_needs_parse(item, prefilter_gate=prefilter_gate) and item.parse_status != "parsed" for item in accepted):
         return "incomplete_inspection", "unparsed_candidate", False
     if any(item.evidence and item.evidence.other_triples for item in accepted):
         return "not_verified", "other_shacl_iri_only", True
@@ -1019,8 +1428,12 @@ def _operational_reason(inspection: Inspection, accepted: list[FileResult]) -> s
     return ""
 
 
-def _parses_complete(accepted: list[FileResult]) -> bool:
-    return all(item.parse_status == "parsed" for item in accepted)
+def _needs_parse(item: FileResult, *, prefilter_gate: bool) -> bool:
+    return not (prefilter_gate and not item.text_hit)
+
+
+def _parses_complete(accepted: list[FileResult], *, prefilter_gate: bool = False) -> bool:
+    return all(item.parse_status == "parsed" for item in accepted if _needs_parse(item, prefilter_gate=prefilter_gate))
 
 
 def _noncanonical_detected(accepted: list[FileResult]) -> bool:
@@ -1203,8 +1616,10 @@ def _load_state(path: Path, config_digest: str, vocab_sha: str, fresh: bool) -> 
         state = json.loads(path.read_text(encoding="utf-8"))
         if state.get("config_sha256") != config_digest or state.get("vocab_sha256") != vocab_sha:
             raise SystemExit("Verification state does not match this config or vocabulary. Re-run with --fresh.")
+        state.setdefault("trees", {})
+        state.setdefault("repositories", {})
         return state
-    return {"config_sha256": config_digest, "vocab_sha256": vocab_sha, "repositories": {}}
+    return {"config_sha256": config_digest, "vocab_sha256": vocab_sha, "repositories": {}, "trees": {}}
 
 
 def _write_state(path: Path, state: dict) -> None:
@@ -1238,9 +1653,21 @@ def _summary(
         "milestone": 2,
         "phase": phase or None,
         "mode": (
-            "phase1"
-            if phase == "1"
-            else ("benchmark" if any(row.get("benchmark_group") for row in rows) else ("pilot" if any(row.get("pilot_stratum") for row in rows) else "selection"))
+            "phase2_pilot"
+            if phase == "2" and any(row.get("pilot_stratum") for row in rows)
+            else (
+                "phase2"
+                if phase == "2"
+                else (
+                    "phase1"
+                    if phase == "1"
+                    else (
+                        "benchmark"
+                        if any(row.get("benchmark_group") for row in rows)
+                        else ("pilot" if any(row.get("pilot_stratum") for row in rows) else "selection")
+                    )
+                )
+            )
         ),
         "git_commit": git_commit,
         "git_dirty": git_dirty,
@@ -1275,7 +1702,9 @@ def _summary(
             "prefilter": (
                 "Repositories with no code-search signal are parsed only when a candidate file's "
                 "bytes contain the SHACL namespace IRI or a derived shape predicate. "
-                "A prefilter miss is not_verified/prefilter_no_shacl_signal with inspection_complete false."
+                "A byte scan that covers every accepted candidate file and finds no canonical SHACL "
+                "signal is not_verified/prefilter_no_canonical_shacl_signal. That is not no_shacl_found. "
+                "inspection_complete is true only when those candidate files were actually scanned."
             ),
             "no_shacl_found": (
                 "Every accepted candidate file was parsed, none contained a SHACL-namespace IRI, "

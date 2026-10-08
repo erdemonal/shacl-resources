@@ -22,7 +22,11 @@ from shacl_study.verification import (
     run_verification,
     select_benchmark,
     select_code_signal,
+    select_phase2,
+    select_phase2_pilot,
     select_pilot,
+    resolve_tree_census,
+    tree_identity_report,
 )
 
 NOT_IN_MILESTONE = ("inspect", "stats", "audit", "run-all")
@@ -50,7 +54,7 @@ def main(argv: list[str] | None = None) -> None:
     verify.add_argument("--candidates", default="data/results/candidate_repositories.csv")
     verify.add_argument("--data-dir", default="data")
     verify.add_argument("--pilot", type=int, default=None, help="Inspect a stratified pilot of this many repositories.")
-    verify.add_argument("--phase", type=int, choices=[1], default=None, help="Phase 1 verifies code-search repositories only.")
+    verify.add_argument("--phase", type=int, choices=[1, 2], default=None, help="Phase 1 is code-search repositories. Phase 2 is the remainder. Phase 2 with --pilot does not start the full remainder.")
     verify.add_argument(
         "--benchmark",
         type=int,
@@ -63,6 +67,11 @@ def main(argv: list[str] | None = None) -> None:
     verify.add_argument("--tarball-threshold", type=int, default=None, help="Use one tarball when the candidate tier reaches this size.")
     verify.add_argument("--cache-dir", default=None, help="GitHub response cache. Defaults to data/raw/github-cache.")
     verify.add_argument("--benchmark-name", default="phase1_benchmark")
+    verify.add_argument(
+        "--tree-census",
+        action="store_true",
+        help="Phase 2 only. Resolve commit and tree SHAs without downloading repository files.",
+    )
     for name in NOT_IN_MILESTONE:
         subparsers.add_parser(name, help="Not implemented.")
 
@@ -120,17 +129,22 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def _verify(args) -> None:
+    phase2_pilot = args.phase == 2 and args.pilot is not None
+    phase2_census = args.phase == 2 and args.tree_census
     selected = [
-        args.pilot is not None,
-        args.phase is not None,
+        phase2_census,
+        phase2_pilot,
+        args.pilot is not None and not phase2_pilot,
+        args.phase == 1,
+        args.phase == 2 and args.pilot is None and not args.tree_census,
         args.full_corpus,
         bool(args.repository_id),
         args.benchmark is not None,
     ]
     if sum(bool(item) for item in selected) != 1:
         raise SystemExit(
-            "Refusing an unscoped verification run. Pass --pilot N, --phase 1, --benchmark N, or --repository-id. "
-            "--full-corpus is separate."
+            "Refusing an unscoped verification run. Pass --pilot N, --phase 1, --phase 2, --phase 2 --pilot N, "
+            "--phase 2 --tree-census, --benchmark N, or --repository-id. --full-corpus is separate."
         )
     if args.pilot is not None and args.full_corpus:
         raise SystemExit("Pass either --pilot or --full-corpus.")
@@ -154,11 +168,22 @@ def _verify(args) -> None:
         missing = wanted - {row["repository_id"] for row in rows}
         if missing:
             raise SystemExit(f"Unknown repository id: {', '.join(sorted(missing))}")
+    elif phase2_census:
+        rows = select_phase2(candidates)
+        print(f"phase=2 tree_census repositories={len(rows)}")
+        print("Resolving commit and tree SHAs only. Repository files are not downloaded.")
+    elif phase2_pilot:
+        rows = select_phase2_pilot(candidates, args.pilot)
+        print(f"phase=2 pilot repositories={len(rows)}")
     elif args.pilot is not None:
         rows = select_pilot(candidates, args.pilot)
     elif args.phase == 1:
         rows = select_code_signal(candidates)
         print(f"phase=1 code_signal_repositories={len(rows)}")
+    elif args.phase == 2:
+        rows = select_phase2(candidates)
+        print(f"phase=2 repositories_without_code_signal={len(rows)}")
+        print("Full Phase 2 is selected. This command inspects every remaining repository.")
     elif args.benchmark is not None:
         pilot_ids = _repository_ids(data_dir / "pilot" / "milestone2" / "repository_verification.csv")
         full_ids = _state_repository_ids(data_dir / "candidates" / "verification_state.json")
@@ -182,12 +207,29 @@ def _verify(args) -> None:
         raise SystemExit("No repositories selected.")
     _load_dotenv(Path(".env"))
     token = os.environ.get("GITHUB_TOKEN", "")
-    logger = configure_logging(data_dir / "logs" / "verification.log")
+    if phase2_census:
+        isolated = data_dir / "results" / "phase2_tree_census"
+        log_path = data_dir / "logs" / "phase2-tree-census.log"
+    elif phase2_pilot:
+        isolated = data_dir / "results" / "phase2_pilot"
+        log_path = data_dir / "logs" / "phase2-pilot.log"
+    elif args.phase == 2:
+        isolated = data_dir / "results" / "phase2"
+        log_path = data_dir / "logs" / "phase2.log"
+    elif args.benchmark is not None:
+        isolated = data_dir / "results" / (args.benchmark_name or "phase1_benchmark")
+        log_path = data_dir / "logs" / "verification.log"
+    else:
+        isolated = None
+        log_path = data_dir / "logs" / "verification.log"
+    logger = configure_logging(log_path)
     commit, dirty = _git_info(Path.cwd())
-    benchmark_dir = data_dir / "results" / (args.benchmark_name or "phase1_benchmark")
     try:
         cache_dir = Path(args.cache_dir) if args.cache_dir else data_dir / "raw" / "github-cache"
         client = GitHubClient(token, cache_dir)
+        if phase2_census:
+            _run_tree_census(args, rows, client, data_dir, isolated, logger)
+            return
         summary = run_verification(
             rows=rows,
             source=GitHubContent(client, config),
@@ -201,8 +243,8 @@ def _verify(args) -> None:
             phase=str(args.phase or ""),
             git_commit=commit,
             git_dirty=dirty,
-            state_path=(benchmark_dir / "state.json") if args.benchmark is not None else None,
-            results_dir=benchmark_dir if args.benchmark is not None else None,
+            state_path=(isolated / "state.json") if isolated is not None else None,
+            results_dir=isolated,
         )
     except GitHubAuthError as exc:
         raise SystemExit(str(exc)) from exc
@@ -212,11 +254,11 @@ def _verify(args) -> None:
         report = _benchmark_report(
             data_dir,
             groups,
-            results_dir=benchmark_dir,
+            results_dir=isolated,
             pilot_ids=_repository_ids(data_dir / "pilot" / "milestone2" / "repository_verification.csv"),
             full_ids=_state_repository_ids(data_dir / "candidates" / "verification_state.json"),
         )
-        report_path = benchmark_dir / "benchmark_report.json"
+        report_path = isolated / "benchmark_report.json"
         report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         cold = report["cold_seconds"]
         print(
@@ -378,6 +420,85 @@ def _percentile(values: list[float], percent: float) -> float:
     ordered = sorted(values)
     index = min(len(ordered) - 1, max(0, math.ceil(percent / 100 * len(ordered)) - 1))
     return round(ordered[index], 3)
+
+
+def _run_tree_census(args, rows, client, data_dir: Path, census_dir: Path, logger) -> None:
+    census_dir.mkdir(parents=True, exist_ok=True)
+    state = resolve_tree_census(
+        rows,
+        source=GitHubContent(client, {}),
+        state_path=census_dir / "pins.json",
+        fresh=args.fresh,
+        clock=lambda: datetime.now(timezone.utc),
+        logger=logger,
+    )
+    report = tree_identity_report(rows, state["pins"])
+    report["runtime_estimate"] = _tree_runtime_estimate(data_dir, report)
+    (census_dir / "tree_identity_report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(
+        "tree_census "
+        f"repositories={report['phase2_repositories']} "
+        f"resolved={report['tree_sha_resolved']} "
+        f"unique_trees={report['unique_tree_shas']} "
+        f"avoided={report['content_inspections_avoided']} "
+        f"avoided_percent={report['content_inspections_avoided_percent_of_phase2']}"
+    )
+    estimate = report["runtime_estimate"]
+    if estimate.get("available"):
+        print(
+            "runtime_estimate "
+            f"unique_tree_mean_hours={estimate['unique_tree_mean_hours']} "
+            f"unique_tree_median_hours={estimate['unique_tree_median_hours']}"
+        )
+
+
+def _tree_runtime_estimate(data_dir: Path, report: dict) -> dict:
+    csv_path = data_dir / "results" / "phase2_pilot" / "repository_verification.csv"
+    log_path = data_dir / "logs" / "phase2-pilot.log"
+    if not csv_path.exists() or not log_path.exists():
+        return {"available": False}
+    with csv_path.open(encoding="utf-8", newline="") as handle:
+        pilot_rows = list(csv.DictReader(handle))
+    durations = _pilot_wall_seconds(log_path)
+    if len(durations) != len(pilot_rows):
+        return {"available": False, "reason": f"pilot timings {len(durations)} rows {len(pilot_rows)}"}
+    buckets: dict[str, list[float]] = {}
+    for row, duration in zip(pilot_rows, durations):
+        buckets.setdefault(row["pilot_stratum"], []).append(duration)
+    means = {name: statistics.mean(values) for name, values in buckets.items()}
+    medians = {name: statistics.median(values) for name, values in buckets.items()}
+    unique = report["unique_trees_by_representative_stratum"]
+    mean_seconds = sum(count * means[name] for name, count in unique.items() if name in means)
+    median_seconds = sum(count * medians[name] for name, count in unique.items() if name in medians)
+    return {
+        "available": True,
+        "pilot_mean_seconds": {name: round(value, 3) for name, value in means.items()},
+        "pilot_median_seconds": {name: round(value, 3) for name, value in medians.items()},
+        "unique_tree_mean_hours": round(mean_seconds / 3600, 2),
+        "unique_tree_median_hours": round(median_seconds / 3600, 2),
+        "basis": (
+            "Each unique tree is charged once, using the Phase 2 pilot mean or median of the "
+            "stratum of its first repository. Reused repositories add no content-inspection time."
+        ),
+    }
+
+
+def _pilot_wall_seconds(log_path: Path) -> list[float]:
+    durations: list[float] = []
+    started: float | None = None
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        if " INFO verify " not in line and " INFO status " not in line:
+            continue
+        stamp = line.split(" INFO ", 1)[0]
+        hms, millis = stamp.split(",")
+        hour, minute, second = hms.split(" ")[1].split(":")
+        instant = int(hour) * 3600 + int(minute) * 60 + int(second) + int(millis) / 1000
+        if " INFO verify " in line:
+            started = instant
+        elif started is not None:
+            durations.append(instant - started)
+            started = None
+    return durations
 
 
 def _load_dotenv(path: Path) -> None:
